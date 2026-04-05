@@ -1,0 +1,53 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Build artifacts
+.build/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+*.coverage
+.coverage
+htmlcov/
+
+# Secrets & credentials — never commit these
+.env
+.env.*
+credentials.json
+client_secret*.json
+token.json
+service_account*.json
+gcp-credentials*.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
