@@ -59,17 +59,9 @@ Gmail Inbox
 ## Prerequisites (One-Time Manual Setup)
 
 All manual steps must be completed before the first deployment.
+The S3 state bucket is **created automatically by the pipeline** on first run — no manual bucket creation needed.
 
-### 1. AWS — Terraform State Bucket
-
-Run `scripts/bootstrap.sh` to create and configure the S3 state bucket:
-
-```bash
-chmod +x scripts/bootstrap.sh
-./scripts/bootstrap.sh
-```
-
-### 2. AWS — OIDC Provider + GitHub Actions IAM Role
+### 1. AWS — OIDC Provider + GitHub Actions IAM Role
 
 ```bash
 # Create OIDC provider
