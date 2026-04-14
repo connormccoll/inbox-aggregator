@@ -23,6 +23,9 @@ sns = boto3.client("sns", region_name=region)
 
 HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
+
+CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
 
 
 def _get_active_subscribers() -> list[dict]:
@@ -44,8 +47,17 @@ def _get_holdings_for_ticker(ticker: str) -> list[dict]:
     return resp.get("Items", [])
 
 
-def _format_sms(rec: dict, holdings: list[dict]) -> str:
-    """Format a concise SMS alert under 160 chars."""
+def _get_open_position(ticker: str, source: str) -> dict | None:
+    """Fetch OpenPositions row for a specific ticker+source to get original rec date."""
+    table = dynamodb.Table(OPEN_POSITIONS_TABLE)
+    resp = table.get_item(
+        Key={"PK": f"TICKER#{ticker}", "SK": f"SOURCE#{source}"},
+    )
+    return resp.get("Item")
+
+
+def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = None) -> str:
+    """Format a concise SMS alert under 320 chars."""
     ticker = rec.get("ticker", "")
     action = rec.get("action", "")
     source = rec.get("source", "")
@@ -72,9 +84,13 @@ def _format_sms(rec: dict, holdings: list[dict]) -> str:
     lines.append(f"Portfolio: {portfolio_str}")
     lines.append(email_date)
 
-    message = "\n".join(lines)
+    # For close actions, include when this source originally recommended the position
+    if action in CLOSE_ACTIONS and open_position:
+        first_rec = open_position.get("first_rec_date")
+        if first_rec:
+            lines.append(f"Orig rec: {first_rec}")
 
-    # Truncate to 320 chars (2 SMS segments max) to avoid excessive billing
+    message = "\n".join(lines)
     return message[:320]
 
 
@@ -121,7 +137,12 @@ def lambda_handler(event: dict, context) -> None:
             logger.info("ticker=%s not in any portfolio — no immediate alert.", ticker)
             continue
 
-        message = _format_sms(rec, holdings)
+        # For close actions on owned positions, fetch original rec date from OpenPositions
+        open_position = None
+        if rec.get("action", "").upper() in CLOSE_ACTIONS:
+            open_position = _get_open_position(ticker, rec.get("source", ""))
+
+        message = _format_sms(rec, holdings, open_position)
         logger.info("Sending immediate alert for ticker=%s to %d subscribers", ticker, len(subscribers))
 
         for subscriber in subscribers:

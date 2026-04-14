@@ -33,3 +33,11 @@ output "processed_emails_table_name" {
 output "processed_emails_table_arn" {
   value = aws_dynamodb_table.processed_emails.arn
 }
+
+output "open_positions_table_name" {
+  value = aws_dynamodb_table.open_positions.name
+}
+
+output "open_positions_table_arn" {
+  value = aws_dynamodb_table.open_positions.arn
+}

@@ -150,3 +150,35 @@ resource "aws_dynamodb_table" "processed_emails" {
     Name = "${local.prefix}-processed-emails"
   }
 }
+
+# ──────────────────────────────────────────────
+# OpenPositions table
+# Tracks one row per ticker per source.
+# BUY/POSITIVE → open_status=OPEN (no TTL)
+# SELL/STOP_LOSS → open_status=CLOSED, TTL=7 days (auto-purge after close tracking window)
+# PK: TICKER#<ticker>  SK: SOURCE#<source_name>
+# ──────────────────────────────────────────────
+resource "aws_dynamodb_table" "open_positions" {
+  name         = "${local.prefix}-open-positions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  tags = {
+    Name = "${local.prefix}-open-positions"
+  }
+}

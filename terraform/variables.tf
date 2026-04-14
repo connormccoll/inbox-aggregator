@@ -32,3 +32,9 @@ variable "gmail_secrets_name" {
   type        = string
   default     = "inbox-aggregator/gmail"
 }
+
+variable "weekly_digest_cron" {
+  description = "EventBridge cron for weekly digest Lambda (UTC). Default: Sundays 7 PM UTC (3 PM ET)."
+  type        = string
+  default     = "cron(0 19 ? * SUN *)"
+}

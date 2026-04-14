@@ -49,3 +49,27 @@ resource "aws_lambda_permission" "gmail_watch_refresh_invoke" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.gmail_watch_refresh.arn
 }
+
+# ──────────────────────────────────────────────
+# Weekly Digest — every Sunday
+# ──────────────────────────────────────────────
+resource "aws_cloudwatch_event_rule" "weekly_digest" {
+  name                = "${local.prefix}-weekly-digest"
+  description         = "Trigger weekly-digest Lambda every Sunday with open position summary."
+  schedule_expression = var.weekly_digest_cron
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "weekly_digest" {
+  rule      = aws_cloudwatch_event_rule.weekly_digest.name
+  target_id = "weekly-digest-lambda"
+  arn       = var.weekly_digest_lambda_arn
+}
+
+resource "aws_lambda_permission" "weekly_digest_invoke" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = var.weekly_digest_lambda_arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.weekly_digest.arn
+}

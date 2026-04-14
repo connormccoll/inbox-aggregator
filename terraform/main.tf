@@ -95,6 +95,8 @@ data "aws_iam_policy_document" "dynamodb_readwrite" {
       module.dynamodb.subscribers_table_arn,
       "${module.dynamodb.subscribers_table_arn}/index/*",
       module.dynamodb.processed_emails_table_arn,
+      module.dynamodb.open_positions_table_arn,
+      "${module.dynamodb.open_positions_table_arn}/index/*",
     ]
   }
 }
@@ -121,18 +123,28 @@ data "aws_iam_policy_document" "bedrock_invoke" {
   }
 }
 
-# Policy for SNS SMS publish (no ARN for direct phone number publish)
+# Policy for SNS SMS publish (direct phone number publish — no resource ARN applies)
 data "aws_iam_policy_document" "sns_publish" {
   statement {
     sid       = "SNSPublishSMS"
     effect    = "Allow"
     actions   = ["sns:Publish"]
     resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "sns:Type"
-      values   = ["Transactional"]
-    }
+  }
+}
+
+# Policy for SSM Parameter Store (historyId tracking by gmail_webhook)
+data "aws_iam_policy_document" "ssm_history_id" {
+  statement {
+    sid    = "SSMHistoryId"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:PutParameter",
+    ]
+    resources = [
+      "arn:aws:ssm:${local.region}:${local.account_id}:parameter/inbox-aggregator/gmail-history-id",
+    ]
   }
 }
 
@@ -156,6 +168,7 @@ module "lambda_gmail_webhook" {
   inline_policies = {
     sqs-send          = data.aws_iam_policy_document.sqs_send.json
     read-gmail-secret = data.aws_iam_policy_document.read_gmail_secret.json
+    ssm-history-id    = data.aws_iam_policy_document.ssm_history_id.json
   }
 }
 
@@ -175,6 +188,7 @@ module "lambda_email_processor" {
     RECOMMENDATIONS_TABLE    = module.dynamodb.recommendations_table_name
     HOLDINGS_TABLE           = module.dynamodb.holdings_table_name
     PROCESSED_EMAILS_TABLE   = module.dynamodb.processed_emails_table_name
+    OPEN_POSITIONS_TABLE     = module.dynamodb.open_positions_table_name
     GMAIL_SECRET_NAME        = module.secrets.gmail_secret_name
     BEDROCK_MODEL_ID         = var.bedrock_model_id
     AWS_REGION_NAME          = var.aws_region
@@ -223,9 +237,10 @@ module "lambda_sns_dispatcher" {
   layer_arns    = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
-    HOLDINGS_TABLE    = module.dynamodb.holdings_table_name
-    SUBSCRIBERS_TABLE = module.dynamodb.subscribers_table_name
-    AWS_REGION_NAME   = var.aws_region
+    HOLDINGS_TABLE        = module.dynamodb.holdings_table_name
+    SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
+    OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
+    AWS_REGION_NAME       = var.aws_region
   }
 
   inline_policies = {
@@ -289,6 +304,30 @@ module "lambda_daily_digest" {
 }
 
 # ──────────────────────────────────────────────
+# Lambda: weekly-digest
+# EventBridge cron; scans OpenPositions → sends weekly SMS summary
+# ──────────────────────────────────────────────
+module "lambda_weekly_digest" {
+  source        = "./modules/lambda"
+  function_name = "${local.prefix}-weekly-digest"
+  source_dir    = "${path.module}/../lambdas/weekly_digest"
+  timeout       = 60
+  layer_arns    = [aws_lambda_layer_version.shared.arn]
+
+  environment_variables = {
+    OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
+    HOLDINGS_TABLE        = module.dynamodb.holdings_table_name
+    SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
+    AWS_REGION_NAME       = var.aws_region
+  }
+
+  inline_policies = {
+    dynamodb-readwrite = data.aws_iam_policy_document.dynamodb_readwrite.json
+    sns-publish        = data.aws_iam_policy_document.sns_publish.json
+  }
+}
+
+# ──────────────────────────────────────────────
 # Lambda: gmail-watch-refresh
 # EventBridge rate(1 day); renews Gmail Watch
 # ──────────────────────────────────────────────
@@ -328,6 +367,31 @@ module "eventbridge" {
   daily_digest_cron              = var.daily_digest_cron
   daily_digest_lambda_arn        = module.lambda_daily_digest.function_arn
   gmail_watch_refresh_lambda_arn = module.lambda_gmail_watch_refresh.function_arn
+  weekly_digest_cron             = var.weekly_digest_cron
+  weekly_digest_lambda_arn       = module.lambda_weekly_digest.function_arn
+}
+
+# ──────────────────────────────────────────────
+# CloudWatch alarm: DLQ depth
+# Fires when messages accumulate in the dead-letter queue (processing failures)
+# ──────────────────────────────────────────────
+resource "aws_cloudwatch_metric_alarm" "dlq_depth" {
+  alarm_name          = "${local.prefix}-dlq-not-empty"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Messages are accumulating in the email-processing DLQ. Check Lambda logs for errors."
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = module.sqs.dlq_name
+  }
+
+  # alarm_actions = []  # Wire an SNS topic here to receive email/SMS alerts on DLQ depth
 }
 
 # ──────────────────────────────────────────────

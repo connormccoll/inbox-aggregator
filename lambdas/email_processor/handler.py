@@ -31,10 +31,17 @@ bedrock = boto3.client("bedrock-runtime", region_name=region)
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 PROCESSED_EMAILS_TABLE = os.environ["PROCESSED_EMAILS_TABLE"]
+OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 
 PROCESSED_TABLE_TTL_DAYS = 30
 RECOMMENDATIONS_TTL_DAYS = 365
+CLOSE_TRACKING_DAYS = 7  # Days to keep CLOSED open-position rows before TTL purge
+
+# Actions that open/maintain a position
+OPEN_ACTIONS = {"BUY", "POSITIVE"}
+# Actions that close a position
+CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
 
 EXTRACTION_PROMPT = """You are a financial email analyst. Analyse the following email and extract all stock trading information.
 
@@ -179,7 +186,107 @@ def _extract_with_bedrock(email: dict) -> dict:
     return json.loads(text)
 
 
-def _write_recommendations(recommendations_table, holdings_table, email: dict, extracted: dict) -> None:
+def _update_open_positions(
+    open_positions_table,
+    ticker: str,
+    source: str,
+    action: str,
+    confidence: str,
+    email_date: str,
+) -> None:
+    """
+    Maintain the OpenPositions table:
+    - BUY/POSITIVE → upsert as OPEN (increment rec_count, keep first_rec_date unchanged).
+    - SELL/STOP_LOSS/NEGATIVE → upsert as CLOSED with 7-day TTL.
+    """
+    pk = f"TICKER#{ticker}"
+    sk = f"SOURCE#{source}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if action in OPEN_ACTIONS:
+        # SET fields that always update; ADD rec_count; SET first_rec_date only if not yet present
+        open_positions_table.update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression=(
+                "SET #action = :action, confidence = :confidence, "
+                "latest_rec_date = :date, ticker = :ticker, #source = :source, "
+                "open_status = :status, updated_at = :now "
+                "ADD rec_count :one "
+                "REMOVE close_action, close_date, #ttl"
+            ),
+            ExpressionAttributeNames={
+                "#action": "action",
+                "#source": "source",
+                "#ttl": "ttl",
+            },
+            ExpressionAttributeValues={
+                ":action": action,
+                ":confidence": confidence,
+                ":date": email_date,
+                ":ticker": ticker,
+                ":source": source,
+                ":status": "OPEN",
+                ":now": now_iso,
+                ":one": 1,
+            },
+        )
+        # Set first_rec_date only if this is the first mention
+        try:
+            open_positions_table.update_item(
+                Key={"PK": pk, "SK": sk},
+                UpdateExpression="SET first_rec_date = :date",
+                ConditionExpression="attribute_not_exists(first_rec_date)",
+                ExpressionAttributeValues={":date": email_date},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
+    elif action in CLOSE_ACTIONS:
+        close_ttl = int(time.time()) + (CLOSE_TRACKING_DAYS * 86400)
+        open_positions_table.update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression=(
+                "SET #action = :action, confidence = :confidence, "
+                "latest_rec_date = :date, ticker = :ticker, #source = :source, "
+                "open_status = :status, close_action = :action, close_date = :date, "
+                "#ttl = :ttl, updated_at = :now "
+                "ADD rec_count :one"
+            ),
+            ExpressionAttributeNames={
+                "#action": "action",
+                "#source": "source",
+                "#ttl": "ttl",
+            },
+            ExpressionAttributeValues={
+                ":action": action,
+                ":confidence": confidence,
+                ":date": email_date,
+                ":ticker": ticker,
+                ":source": source,
+                ":status": "CLOSED",
+                ":ttl": close_ttl,
+                ":now": now_iso,
+                ":one": 1,
+            },
+        )
+        # Set first_rec_date only if this is the first mention
+        try:
+            open_positions_table.update_item(
+                Key={"PK": pk, "SK": sk},
+                UpdateExpression="SET first_rec_date = :date",
+                ConditionExpression="attribute_not_exists(first_rec_date)",
+                ExpressionAttributeValues={":date": email_date},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
+    logger.info("Updated open position: ticker=%s source=%s action=%s status=%s",
+                ticker, source, action, "OPEN" if action in OPEN_ACTIONS else "CLOSED")
+
+
+def _write_recommendations(recommendations_table, holdings_table, open_positions_table, email: dict, extracted: dict) -> None:
     email_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     message_id = email["message_id"]
     source_name = extracted.get("source_name", "Unknown")
@@ -195,6 +302,10 @@ def _write_recommendations(recommendations_table, holdings_table, email: dict, e
         confidence = rec.get("confidence", "MEDIUM")
         price_target = rec.get("price_target")
         stop_loss_price = rec.get("stop_loss_price")
+
+        # Update OpenPositions BEFORE writing to Recommendations so the
+        # DynamoDB Streams dispatcher can immediately see the current open state.
+        _update_open_positions(open_positions_table, ticker, source_name, action, confidence, email_date)
 
         item = {
             "PK": f"TICKER#{ticker}",
@@ -261,6 +372,7 @@ def lambda_handler(event: dict, context) -> dict:
     processed_emails_table = dynamodb.Table(PROCESSED_EMAILS_TABLE)
     recommendations_table = dynamodb.Table(RECOMMENDATIONS_TABLE)
     holdings_table = dynamodb.Table(HOLDINGS_TABLE)
+    open_positions_table = dynamodb.Table(OPEN_POSITIONS_TABLE)
 
     failed_items = []
 
@@ -290,7 +402,7 @@ def lambda_handler(event: dict, context) -> dict:
             )
 
             # Step 4: Write to DynamoDB
-            _write_recommendations(recommendations_table, holdings_table, email, extracted)
+            _write_recommendations(recommendations_table, holdings_table, open_positions_table, email, extracted)
 
         except Exception as exc:
             logger.exception("Failed to process SQS record messageId=%s: %s", item_id, exc)
