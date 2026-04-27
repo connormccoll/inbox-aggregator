@@ -10,17 +10,3 @@ resource "aws_secretsmanager_secret" "gmail" {
   }
 }
 
-# Placeholder — actual value injected by setup_gmail_oauth.py
-resource "aws_secretsmanager_secret_version" "gmail_placeholder" {
-  secret_id = aws_secretsmanager_secret.gmail.id
-  secret_string = jsonencode({
-    client_id     = "PLACEHOLDER"
-    client_secret = "PLACEHOLDER"
-    refresh_token = "PLACEHOLDER"
-  })
-
-  lifecycle {
-    # Prevent Terraform from overwriting values injected by the setup script
-    ignore_changes = [secret_string]
-  }
-}
