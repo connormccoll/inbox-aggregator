@@ -38,3 +38,9 @@ variable "weekly_digest_cron" {
   type        = string
   default     = "cron(0 19 ? * SUN *)"
 }
+
+variable "origination_number" {
+  description = "Toll-free origination phone number for SMS sends (E.164 format)."
+  type        = string
+  default     = "+18882648390"
+}
