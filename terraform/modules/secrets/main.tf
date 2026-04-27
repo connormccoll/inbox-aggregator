@@ -1,9 +1,3 @@
-# Import the secret if it was pre-created by setup_gmail_oauth.py
-import {
-  to = aws_secretsmanager_secret.gmail
-  id = var.gmail_secrets_name
-}
-
 # Gmail OAuth credentials (client_id, client_secret, refresh_token)
 # Values are populated manually via scripts/setup_gmail_oauth.py
 resource "aws_secretsmanager_secret" "gmail" {

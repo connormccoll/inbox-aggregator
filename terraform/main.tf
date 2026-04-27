@@ -48,6 +48,12 @@ module "sqs" {
   environment = var.environment
 }
 
+# Import pre-existing secret created by setup_gmail_oauth.py before first Terraform apply
+import {
+  to = module.secrets.aws_secretsmanager_secret.gmail
+  id = var.gmail_secrets_name
+}
+
 module "secrets" {
   source             = "./modules/secrets"
   gmail_secrets_name = var.gmail_secrets_name
