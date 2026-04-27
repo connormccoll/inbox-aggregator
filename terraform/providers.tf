@@ -26,9 +26,10 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "inbox-aggregator"
-      ManagedBy   = "terraform"
-      Environment = var.environment
+      Project        = "inbox-aggregator"
+      ManagedBy      = "terraform"
+      Environment    = var.environment
+      awsApplication = "arn:aws:resource-groups:us-east-1:317605985779:group/inboxAggregator/0awclyzlap1ptrfvd46bn859n8"
     }
   }
 }
