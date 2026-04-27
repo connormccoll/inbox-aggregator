@@ -1,0 +1,8 @@
+# Google API client libraries
+google-api-python-client==2.164.0
+google-auth==2.40.1
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1
+
+# HTTP transport
+httplib2==0.22.0
