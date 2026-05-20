@@ -117,7 +117,6 @@ def lambda_handler(event: dict, context) -> dict:
         sqs.send_message(
             QueueUrl=SQS_QUEUE_URL,
             MessageBody=json.dumps({"message_id": msg_id}),
-            MessageDeduplicationId=None,  # Standard queue — no dedup needed here (handled in email_processor)
         )
         logger.info("Enqueued message_id=%s", msg_id)
 
