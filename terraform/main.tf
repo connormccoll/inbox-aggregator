@@ -124,8 +124,8 @@ data "aws_iam_policy_document" "bedrock_invoke" {
     effect  = "Allow"
     actions = ["bedrock:InvokeModel"]
     resources = [
-      "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
-      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "arn:aws:bedrock:*::foundation-model/*",
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
     ]
   }
 }
