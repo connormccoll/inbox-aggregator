@@ -16,9 +16,9 @@ variable "gcp_project_id" {
 }
 
 variable "bedrock_model_id" {
-  description = "AWS Bedrock model ID for email extraction."
+  description = "AWS Bedrock inference profile ID for email extraction."
   type        = string
-  default     = "anthropic.claude-haiku-4-5-20251001-v1:0"
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 variable "daily_digest_cron" {
