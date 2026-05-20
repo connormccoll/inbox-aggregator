@@ -41,7 +41,7 @@ CLOSE_TRACKING_DAYS = 7  # Days to keep CLOSED open-position rows before TTL pur
 # Actions that open/maintain a position
 OPEN_ACTIONS = {"BUY", "POSITIVE"}
 # Actions that close a position
-CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
+CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE", "CLOSE"}
 
 EXTRACTION_PROMPT = """You are a financial email analyst. Analyse the following email and extract all stock trading information.
 
@@ -54,7 +54,14 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
       "sentiment": "brief quote or rationale from the email",
       "confidence": "HIGH",
       "price_target": null,
-      "stop_loss_price": null
+      "stop_loss_price": null,
+      "instrument_type": "STOCK",
+      "option_symbol": null,
+      "option_type": null,
+      "strike_price": null,
+      "expiration_date": null,
+      "percent_closed": null,
+      "closed_by": null
     }}
   ],
   "portfolio_update": {{
@@ -68,21 +75,30 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
 }}
 
 Rules:
-- action must be one of: BUY, SELL, STOP_LOSS, HOLD, POSITIVE, NEGATIVE
+- action must be one of: BUY, SELL, STOP_LOSS, HOLD, CLOSE, POSITIVE, NEGATIVE
   - STOP_LOSS: TradeSmith or any stop-loss alert
-  - BUY: explicit buy recommendation
+  - BUY: explicit buy recommendation (includes buying options contracts)
   - SELL: explicit sell recommendation
+  - CLOSE: position closed or percent_closed = 100%
   - HOLD: hold recommendation
   - POSITIVE: positive/bullish mention without explicit buy
   - NEGATIVE: negative/bearish mention without explicit sell
+- If percent_closed = 100 or the alert says the position was closed, use action = CLOSE
 - confidence: HIGH (explicit rec), MEDIUM (implied), LOW (brief mention)
 - price_target: numeric if stated, else null
 - stop_loss_price: numeric if stated, else null
+- instrument_type: STOCK or OPTION
+- option_symbol: full OCC option symbol if present (e.g. MSTR260515P00110000), else null
+- option_type: PUT or CALL if an option, else null
+- strike_price: numeric strike price if an option, else null
+- expiration_date: YYYY-MM-DD expiration if an option, else null
+- percent_closed: numeric percentage if stated (e.g. 100), else null
+- closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X as the newsletter name that originally issued the closed recommendation; else null
+- ticker: always the underlying stock symbol, not the option symbol (e.g. MSTR not MSTR260515P00110000)
 - portfolio_update: only if the email contains a portfolio listing with holdings; null otherwise
-- source_name: the newsletter or service name
+- source_name: the alert platform or email sender (e.g. TradeSmith), not the newsletter inside the email
 - email_type: NEWSLETTER, STOP_LOSS_ALERT, PORTFOLIO_UPDATE, or OTHER
 - If no stock recommendations are found, return an empty recommendations array
-- ticker must be the stock exchange symbol (e.g. AAPL, not Apple)
 
 Email subject: {subject}
 Email from: {sender}
@@ -327,6 +343,18 @@ def _write_recommendations(recommendations_table, holdings_table, open_positions
             item["price_target"] = str(price_target)
         if stop_loss_price is not None:
             item["stop_loss_price"] = str(stop_loss_price)
+
+        # Options fields
+        instrument_type = rec.get("instrument_type", "STOCK")
+        item["instrument_type"] = instrument_type or "STOCK"
+        for opt_field in ("option_symbol", "option_type", "strike_price", "expiration_date", "percent_closed"):
+            val = rec.get(opt_field)
+            if val is not None:
+                item[opt_field] = str(val)
+
+        closed_by = rec.get("closed_by")
+        if closed_by:
+            item["closed_by"] = str(closed_by)
 
         recommendations_table.put_item(Item=item)
         logger.info("Wrote recommendation: ticker=%s action=%s source=%s", ticker, action, source_name)
