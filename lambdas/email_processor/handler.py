@@ -177,11 +177,12 @@ def _extract_with_bedrock(email: dict) -> dict:
     raw = json.loads(response["body"].read())
     text = raw["content"][0]["text"].strip()
 
-    # Strip any accidental markdown fencing
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
+    # Strip markdown code fences if Claude wrapped the JSON
+    if "```" in text:
+        import re
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if match:
+            text = match.group(1).strip()
 
     return json.loads(text)
 
