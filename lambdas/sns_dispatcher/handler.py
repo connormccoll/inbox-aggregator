@@ -24,6 +24,7 @@ sns = boto3.client("sns", region_name=region)
 HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
+ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 
 CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
 
@@ -95,7 +96,7 @@ def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = No
 
 
 def _send_sms(phone_number: str, message: str) -> None:
-    sns.publish(
+    kwargs = dict(
         PhoneNumber=phone_number,
         Message=message,
         MessageAttributes={
@@ -105,6 +106,12 @@ def _send_sms(phone_number: str, message: str) -> None:
             }
         },
     )
+    if ORIGINATION_NUMBER:
+        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
+            "DataType": "String",
+            "StringValue": ORIGINATION_NUMBER,
+        }
+    sns.publish(**kwargs)
 
 
 def _unmarshal_rec(new_image: dict) -> dict:

@@ -23,6 +23,7 @@ sns = boto3.client("sns", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 
 # Ordering preference for digest sections
 ACTION_ORDER = ["STOP_LOSS", "SELL", "BUY", "HOLD", "POSITIVE", "NEGATIVE"]
@@ -75,7 +76,7 @@ def _build_digest(date_str: str, recommendations: list[dict]) -> str:
 
 
 def _send_sms(phone_number: str, message: str) -> None:
-    sns.publish(
+    kwargs = dict(
         PhoneNumber=phone_number,
         Message=message,
         MessageAttributes={
@@ -85,6 +86,12 @@ def _send_sms(phone_number: str, message: str) -> None:
             }
         },
     )
+    if ORIGINATION_NUMBER:
+        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
+            "DataType": "String",
+            "StringValue": ORIGINATION_NUMBER,
+        }
+    sns.publish(**kwargs)
 
 
 def lambda_handler(event: dict, context) -> None:

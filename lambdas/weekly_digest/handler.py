@@ -30,6 +30,7 @@ sns = boto3.client("sns", region_name=region)
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 
 # Max SMS length per segment × 2 segments; split digest into chunks if needed
 SMS_CHUNK_SIZE = 320
@@ -181,7 +182,7 @@ def _chunk_message(message: str, chunk_size: int = SMS_CHUNK_SIZE) -> list[str]:
 
 
 def _send_sms(phone_number: str, message: str) -> None:
-    sns.publish(
+    kwargs = dict(
         PhoneNumber=phone_number,
         Message=message,
         MessageAttributes={
@@ -191,6 +192,12 @@ def _send_sms(phone_number: str, message: str) -> None:
             }
         },
     )
+    if ORIGINATION_NUMBER:
+        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
+            "DataType": "String",
+            "StringValue": ORIGINATION_NUMBER,
+        }
+    sns.publish(**kwargs)
 
 
 def lambda_handler(event: dict, context) -> None:
