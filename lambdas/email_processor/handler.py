@@ -156,6 +156,7 @@ def _mark_processed(table, message_id: str) -> bool:
 
 
 def _extract_with_bedrock(email: dict) -> dict:
+    import re
     prompt = EXTRACTION_PROMPT.format(
         subject=email["subject"],
         sender=email["sender"],
@@ -163,23 +164,17 @@ def _extract_with_bedrock(email: dict) -> dict:
         body=email["body"][:8000],  # ~8k chars to stay within token budget
     )
 
-    response = bedrock.invoke_model(
+    # Use the Converse API — works uniformly across Claude, Nova, Titan, etc.
+    response = bedrock.converse(
         modelId=BEDROCK_MODEL_ID,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": prompt}],
-        }),
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": 1024},
     )
 
-    raw = json.loads(response["body"].read())
-    text = raw["content"][0]["text"].strip()
+    text = response["output"]["message"]["content"][0]["text"].strip()
 
-    # Strip markdown code fences if Claude wrapped the JSON
+    # Strip markdown code fences if the model wrapped the JSON
     if "```" in text:
-        import re
         match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
         if match:
             text = match.group(1).strip()
