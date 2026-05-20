@@ -46,26 +46,26 @@ CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
 EXTRACTION_PROMPT = """You are a financial email analyst. Analyse the following email and extract all stock trading information.
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
-{
+{{
   "recommendations": [
-    {
+    {{
       "ticker": "AAPL",
       "action": "BUY",
       "sentiment": "brief quote or rationale from the email",
       "confidence": "HIGH",
       "price_target": null,
       "stop_loss_price": null
-    }
+    }}
   ],
-  "portfolio_update": {
+  "portfolio_update": {{
     "portfolio_name": "Growth Portfolio",
     "holdings": [
-      {"ticker": "AAPL", "shares": 100}
+      {{"ticker": "AAPL", "shares": 100}}
     ]
-  },
+  }},
   "source_name": "TradeSmith",
   "email_type": "STOP_LOSS_ALERT"
-}
+}}
 
 Rules:
 - action must be one of: BUY, SELL, STOP_LOSS, HOLD, POSITIVE, NEGATIVE
