@@ -27,3 +27,8 @@ output "subscribers_table_name" {
   description = "DynamoDB Subscribers table name."
   value       = module.dynamodb.subscribers_table_name
 }
+
+output "frontend_url" {
+  description = "S3 static website URL for the subscription portal."
+  value       = "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"
+}

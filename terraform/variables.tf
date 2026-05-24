@@ -50,3 +50,10 @@ variable "pushover_api_token" {
   type        = string
   default     = "aefv64pawrsxywpywddaprp8ugz7ih"
 }
+
+variable "invitation_password" {
+  description = "Invitation password for the subscriber registration portal."
+  type        = string
+  default     = "blackfamilytrust"
+  sensitive   = true
+}

@@ -8,6 +8,16 @@ variable "gmail_webhook_lambda_invoke_arn" {
   type        = string
 }
 
+variable "subscribe_lambda_arn" {
+  description = "ARN of the subscribe Lambda function."
+  type        = string
+}
+
+variable "subscribe_lambda_invoke_arn" {
+  description = "Invoke ARN of the subscribe Lambda function."
+  type        = string
+}
+
 variable "environment" {
   description = "Deployment environment."
   type        = string

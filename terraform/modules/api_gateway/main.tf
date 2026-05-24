@@ -40,6 +40,56 @@ resource "aws_api_gateway_integration" "gmail_push_lambda" {
   uri                     = var.gmail_webhook_lambda_invoke_arn
 }
 
+# /subscribe resource
+resource "aws_api_gateway_resource" "subscribe" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = "subscribe"
+}
+
+# OPTIONS method — routes to Lambda which returns CORS headers
+resource "aws_api_gateway_method" "subscribe_options" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.subscribe.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "subscribe_options_lambda" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.subscribe.id
+  http_method             = aws_api_gateway_method.subscribe_options.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.subscribe_lambda_invoke_arn
+}
+
+# POST method
+resource "aws_api_gateway_method" "subscribe_post" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.subscribe.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "subscribe_post_lambda" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.subscribe.id
+  http_method             = aws_api_gateway_method.subscribe_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.subscribe_lambda_invoke_arn
+}
+
+# Grant API Gateway permission to invoke the subscribe Lambda
+resource "aws_lambda_permission" "subscribe_lambda_invoke" {
+  statement_id  = "AllowAPIGatewayInvokeSubscribe"
+  action        = "lambda:InvokeFunction"
+  function_name = var.subscribe_lambda_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
 # Deployment
 resource "aws_api_gateway_deployment" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -49,6 +99,9 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.gmail_push.id,
       aws_api_gateway_method.gmail_push_post.id,
       aws_api_gateway_integration.gmail_push_lambda.id,
+      aws_api_gateway_resource.subscribe.id,
+      aws_api_gateway_method.subscribe_post.id,
+      aws_api_gateway_integration.subscribe_post_lambda.id,
     ]))
   }
 

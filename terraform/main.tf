@@ -140,6 +140,16 @@ data "aws_iam_policy_document" "sns_publish" {
   }
 }
 
+# Policy for subscribe Lambda — write-only to Subscribers table
+data "aws_iam_policy_document" "subscribe_dynamodb_write" {
+  statement {
+    sid       = "SubscribersWrite"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
+    resources = [module.dynamodb.subscribers_table_arn]
+  }
+}
+
 # Policy for SSM Parameter Store (historyId tracking by gmail_webhook)
 data "aws_iam_policy_document" "ssm_history_id" {
   statement {
@@ -363,12 +373,35 @@ module "lambda_gmail_watch_refresh" {
 }
 
 # ──────────────────────────────────────────────
+# Lambda: subscribe
+# API Gateway POST /subscribe; registers a new subscriber in DynamoDB
+# ──────────────────────────────────────────────
+module "lambda_subscribe" {
+  source        = "./modules/lambda"
+  function_name = "${local.prefix}-subscribe"
+  source_dir    = "${path.module}/../lambdas/subscribe"
+  timeout       = 10
+
+  environment_variables = {
+    SUBSCRIBERS_TABLE   = module.dynamodb.subscribers_table_name
+    AWS_REGION_NAME     = var.aws_region
+    INVITATION_PASSWORD = var.invitation_password
+  }
+
+  inline_policies = {
+    subscribers-write = data.aws_iam_policy_document.subscribe_dynamodb_write.json
+  }
+}
+
+# ──────────────────────────────────────────────
 # API Gateway (depends on gmail-webhook Lambda)
 # ──────────────────────────────────────────────
 module "api_gateway" {
   source                          = "./modules/api_gateway"
   gmail_webhook_lambda_arn        = module.lambda_gmail_webhook.function_arn
   gmail_webhook_lambda_invoke_arn = module.lambda_gmail_webhook.invoke_arn
+  subscribe_lambda_arn            = module.lambda_subscribe.function_arn
+  subscribe_lambda_invoke_arn     = module.lambda_subscribe.invoke_arn
   environment                     = var.environment
 }
 
@@ -414,4 +447,47 @@ module "pubsub" {
   source         = "./modules/pubsub"
   gcp_project_id = var.gcp_project_id
   push_endpoint  = "${module.api_gateway.base_url}/gmail-push"
+}
+
+# ──────────────────────────────────────────────
+# S3: Frontend static website (subscription portal)
+# ──────────────────────────────────────────────
+resource "aws_s3_bucket" "frontend" {
+  bucket = "${local.prefix}-frontend-${local.account_id}"
+
+  tags = {
+    Name = "${local.prefix}-frontend"
+  }
+}
+
+resource "aws_s3_bucket_website_configuration" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  index_document { suffix = "index.html" }
+  error_document { key = "index.html" }
+}
+
+resource "aws_s3_bucket_public_access_block" "frontend" {
+  bucket                  = aws_s3_bucket.frontend.id
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_policy" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "PublicRead"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.frontend.arn}/*"
+    }]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.frontend]
 }
