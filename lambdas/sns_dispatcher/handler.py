@@ -61,13 +61,20 @@ def _get_open_position(ticker: str, source: str) -> dict | None:
 
 
 def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = None) -> str:
-    """Format a concise SMS alert under 320 chars."""
+    """Format a concise alert message."""
     ticker = rec.get("ticker", "")
     action = rec.get("action", "")
     source = rec.get("source", "")
     email_date = rec.get("email_date", "")
     stop_loss = rec.get("stop_loss_price")
     price_target = rec.get("price_target")
+    sentiment = rec.get("sentiment", "")
+    instrument_type = rec.get("instrument_type", "STOCK")
+    option_symbol = rec.get("option_symbol")
+    option_type = rec.get("option_type")
+    strike_price = rec.get("strike_price")
+    expiration_date = rec.get("expiration_date")
+    closed_by = rec.get("closed_by")
 
     # Portfolio context
     portfolio_lines = []
@@ -81,21 +88,35 @@ def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = No
     portfolio_str = ", ".join(portfolio_lines)
 
     lines = [f"[INBOX] {action}: {ticker} | {source}"]
+
+    # Option details
+    if instrument_type == "OPTION" and option_symbol:
+        option_parts = [option_symbol]
+        if option_type and strike_price:
+            option_parts.append(f"{option_type} ${strike_price}")
+        if expiration_date:
+            option_parts.append(f"exp {expiration_date}")
+        lines.append(f"Option: {' | '.join(option_parts)}")
+
     if stop_loss:
         lines.append(f"Stop: ${stop_loss}")
     if price_target:
         lines.append(f"Target: ${price_target}")
+    if sentiment:
+        lines.append(f'"{sentiment}"')
     lines.append(f"Portfolio: {portfolio_str}")
     lines.append(email_date)
 
-    # For close actions, include when this source originally recommended the position
-    if action in CLOSE_ACTIONS and open_position:
-        first_rec = open_position.get("first_rec_date")
-        if first_rec:
-            lines.append(f"Orig rec: {first_rec}")
+    # For close actions, show who originally recommended it and when
+    if action in CLOSE_ACTIONS:
+        if closed_by:
+            lines.append(f"Closed by: {closed_by}")
+        if open_position:
+            first_rec = open_position.get("first_rec_date")
+            if first_rec:
+                lines.append(f"Orig rec: {first_rec}")
 
-    message = "\n".join(lines)
-    return message[:320]
+    return "\n".join(lines)
 
 
 def _send_sms(phone_number: str, message: str) -> None:
@@ -171,7 +192,7 @@ def lambda_handler(event: dict, context) -> None:
             pushover_user_key = subscriber.get("pushover_user_key", "")
             if phone.startswith("+"):
                 try:
-                    _send_sms(phone, message)
+                    _send_sms(phone, message[:320])
                     logger.info("SMS sent to %s for ticker=%s", phone, ticker)
                 except Exception as exc:
                     logger.error("Failed to send SMS to %s: %s", phone, exc)
