@@ -386,10 +386,13 @@ module "lambda_subscribe" {
     SUBSCRIBERS_TABLE   = module.dynamodb.subscribers_table_name
     AWS_REGION_NAME     = var.aws_region
     INVITATION_PASSWORD = var.invitation_password
+    ORIGINATION_NUMBER  = var.origination_number
+    PUSHOVER_API_TOKEN  = var.pushover_api_token
   }
 
   inline_policies = {
     subscribers-write = data.aws_iam_policy_document.subscribe_dynamodb_write.json
+    sns-publish       = data.aws_iam_policy_document.sns_publish.json
   }
 }
 
