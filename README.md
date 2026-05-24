@@ -1,6 +1,16 @@
 # Inbox Aggregator
 
-An AWS-serverless pipeline that monitors a Gmail inbox for financial newsletter and TradeSmith emails. AWS Bedrock (Claude Haiku) extracts stock signals and portfolio holdings. Immediate SMS fires via AWS SNS when a signal involves an owned ticker; a daily end-of-day digest and a weekly open-positions summary go to all subscribers.
+A fully serverless AWS pipeline that monitors a Gmail inbox for financial newsletter and TradeSmith emails. AWS Bedrock (Claude Haiku) extracts stock signals, portfolio holdings, and options data. Subscribers receive immediate Pushover push notifications and/or SMS alerts when a tracked ticker fires, plus daily and weekly digest summaries.
+
+## What It Does
+
+- **Email ingestion** — Gmail Watch + Google Cloud Pub/Sub pushes new message IDs to API Gateway in real-time. A webhook Lambda fetches message history, deduplicates, and enqueues IDs to SQS.
+- **AI extraction** — An SQS-triggered Lambda fetches the full email via Gmail API and sends it to Bedrock Claude Haiku, which extracts tickers, actions (BUY/SELL/STOP_LOSS/etc.), sentiment quotes, price targets, stop-loss prices, confidence levels, and options data (symbol, type, strike, expiry).
+- **Immediate alerts** — A DynamoDB Streams consumer checks if the extracted ticker is in any Holdings portfolio. If it is, it fires an alert to all active subscribers via Pushover and/or SMS. Alerts include the sentiment quote, option details (if applicable), and the originating newsletter name for close signals.
+- **Daily digest** — Weekdays at ~4:30 PM ET: all recommendations extracted that day, grouped by action type, sent to all subscribers.
+- **Weekly summary** — Sundays at ~3 PM ET: full scan of all open positions across all sources, with owned tickers starred and close alerts for positions exited in the last 7 days.
+- **Subscription portal** — A React single-page app hosted on S3 + CloudFront (HTTPS) where invited users self-register with name, phone, Pushover user key, and SMS opt-in consent. Sends a welcome message on registration.
+- **Gmail Watch renewal** — A daily EventBridge rule renews the Gmail push subscription (expires every 7 days).
 
 ## Architecture
 
@@ -23,7 +33,7 @@ Gmail Inbox
                     ├─ Gmail API: fetch full email
                     ├─ DynamoDB atomic dedup
                     ├─ Bedrock Claude Haiku: JSON extraction
-                    │   (tickers, actions, sentiment, portfolio)
+                    │   (tickers, actions, sentiment, options, portfolio)
                     ├─ Upsert ──► OpenPositions table  (OPEN/CLOSED per ticker+source)
                     ├─ Write  ──► Recommendations table
                     └─ Write  ──► Holdings table (if portfolio data in email)
@@ -34,19 +44,37 @@ Gmail Inbox
                     Lambda: sns-dispatcher
                     ├─ Holdings TickerIndex GSI: is ticker owned?
                     ├─ If SELL/STOP_LOSS: fetch OpenPositions for original rec date
-                    └─ If owned ──► SNS SMS to all active subscribers
+                    └─ If owned ──► Pushover + SMS to all active subscribers
 
   EventBridge cron (weekdays 9:30 PM UTC ≈ 4:30 PM EST)
                                │
                                ▼
                     Lambda: daily-digest
-                    └─ DateIndex GSI → today's recs → digest SMS to all subscribers
+                    └─ DateIndex GSI → today's recs → Pushover + SMS to all subscribers
 
   EventBridge cron (Sundays 7 PM UTC)
                                │
                                ▼
                     Lambda: weekly-digest
-                    └─ Scan OpenPositions → full open/close summary SMS to all subscribers
+                    └─ Scan OpenPositions → full open/close summary → Pushover + SMS
+
+  EventBridge rate (1 day)
+                               │
+                               ▼
+                    Lambda: gmail-watch-refresh
+                    └─ Renews gmail.users.watch() (expires every 7 days)
+
+  API Gateway /subscribe
+                               │
+                               ▼
+                    Lambda: subscribe
+                    ├─ Validates invitation password
+                    ├─ Writes to Subscribers table
+                    └─ Sends welcome Pushover + SMS
+
+  CloudFront ──► S3 (private)
+                    └─ React subscription portal (HTTPS)
+```
 
   EventBridge rate (1 day)
                                │
@@ -66,6 +94,8 @@ Gmail Inbox
 | ProcessedEmails | `<message_id>` | — | — |
 
 **OpenPositions** tracks one row per ticker+source. `open_status=OPEN` means the source currently recommends holding. `open_status=CLOSED` (SELL/STOP_LOSS signal) has a 7-day TTL so it stays visible in the weekly digest for a week then auto-purges.
+
+**Subscribers** key attributes: `PK` (phone in E.164), `status` (`ACTIVE`/`INACTIVE`), `name`, `email`, `pushover_user_key` (for push notifications — optional if using SMS only).
 
 ## Prerequisites (One-Time Manual Setup)
 
@@ -128,11 +158,13 @@ In the AWS Console → Bedrock → Model access, request access for:
 
 Access is typically granted within minutes.
 
-### 6. AWS SNS — Request SMS Production Access
+### 6. AWS SNS — SMS Sandbox (Optional)
 
-New AWS accounts start in the SMS sandbox (can only send to verified numbers).
-- Console → SNS → Text messaging (SMS) → Sandbox destination phone numbers: add and verify subscriber numbers for testing
-- To go production: SNS → Text messaging → Account → Request production access
+SMS via SNS requires a registered origination number. New accounts are in the sandbox and can only send to verified destination numbers. **Pushover is the recommended primary notification channel** — no carrier registration required.
+
+To use SMS:
+- Console → SNS → Text messaging → Sandbox destination phone numbers: add and verify subscriber numbers for testing
+- For production SMS: register a toll-free number or 10DLC number and request sandbox removal (carrier verification required)
 
 ### 7. GitHub — Secrets and Variables
 
@@ -141,11 +173,13 @@ New AWS accounts start in the SMS sandbox (can only send to verified numbers).
 |---|---|
 | `AWS_ROLE_ARN` | ARN of the IAM role created in step 2 |
 | `GCP_CREDENTIALS` | Contents of the GCP service account JSON key |
+| `INVITATION_PASSWORD` | Password required to access the subscription portal |
 
 **Variables** (non-sensitive — visible in workflow logs):
 | Name | Value |
 |---|---|
 | `AWS_REGION` | `us-east-1` |
+| `AWS_ACCOUNT_ID` | Your 12-digit AWS account ID |
 | `GCP_PROJECT_ID` | Your GCP project ID |
 | `BEDROCK_MODEL_ID` | `anthropic.claude-haiku-4-5-20251001-v1:0` |
 | `TF_STATE_BUCKET` | `inbox-aggregator-tf-state` |
@@ -164,24 +198,25 @@ New AWS accounts start in the SMS sandbox (can only send to verified numbers).
 
 ## Adding Subscribers
 
-Subscribers are managed directly in DynamoDB. Add an item to the `inbox-aggregator-subscribers` table:
+### Via the Subscription Portal (recommended)
 
-```json
-{
-  "PK": "SUBSCRIBER#+15551234567",
-  "status": "ACTIVE",
-  "name": "Your Name",
-  "created_at": "2026-04-05T00:00:00Z"
-}
+After deploying, get the portal URL:
+
+```bash
+terraform -chdir=terraform output frontend_url
 ```
+
+Share that URL with invited users. They enter the invitation password (your `INVITATION_PASSWORD` secret), fill in their name, phone number (E.164), Pushover user key, email, and the SMS opt-in consent checkbox, then submit. They will receive a welcome message immediately.
+
+To get a Pushover user key, users must create a free account at https://pushover.net and install the mobile app.
+
+### Via AWS CLI (manual)
 
 Phone number must be in E.164 format (e.g. `+15551234567`).
 
-On Windows PowerShell (avoids quote-stripping issues):
-
 ```powershell
 @'
-{"PK": {"S": "SUBSCRIBER#+15551234567"}, "status": {"S": "ACTIVE"}, "name": {"S": "Your Name"}}
+{"PK": {"S": "SUBSCRIBER#+15551234567"}, "status": {"S": "ACTIVE"}, "name": {"S": "Your Name"}, "pushover_user_key": {"S": "your-pushover-user-key"}}
 '@ | Out-File -Encoding ascii subscriber.json
 aws dynamodb put-item --table-name inbox-aggregator-subscribers --region us-east-1 --item file://subscriber.json
 Remove-Item subscriber.json
@@ -207,26 +242,40 @@ Repeat for each position. The `portfolio_name` groups positions (e.g. `Main`, `G
 
 ## Alert and Digest Behaviour
 
-### Immediate SMS (real-time)
+### Immediate Alerts (real-time)
 
-Fires only when a **newly extracted recommendation's ticker exists in Holdings**. Sent within seconds of the email arriving.
+Fires only when a **newly extracted recommendation's ticker exists in Holdings**. Sent within seconds of the email arriving via Pushover push notification and/or SMS.
 
 Example for a BUY signal:
 ```
 [INBOX] BUY: AAPL | TradeSmith
+"Strong buy on AI tailwinds"
 Target: $225
 Portfolio: Main (50 shares)
 2026-04-27
 ```
 
-Example for a STOP_LOSS on an owned position (includes original rec date):
+Example for a STOP_LOSS on an owned position (includes original rec date and the source that closed it):
 ```
 [INBOX] STOP_LOSS: TSLA | TradeSmith
+"Trend has broken. Take profits."
 Stop: $210
+Closed by: TradeSmith
 Portfolio: Main (30 shares)
 2026-04-27
 Orig rec: 2026-03-15
 ```
+
+Example for an options alert:
+```
+[INBOX] BUY: SPY | TradeSmith
+"High confidence options play"
+Option: SPY 240124C00580000 CALL $580 exp 2024-01-24
+Portfolio: Main
+2026-04-27
+```
+
+Pushover alerts include the full message. SMS alerts are truncated to 320 characters and chunked if needed.
 
 ### Daily Digest (weekdays ~4:30 PM ET)
 
@@ -265,7 +314,7 @@ Long digests are automatically split into numbered SMS chunks `[1]`, `[2]`, etc.
 ```
 ├── .github/workflows/
 │   ├── pr-check.yml       # terraform plan on PRs
-│   └── deploy.yml         # terraform apply on main
+│   └── deploy.yml         # terraform apply + frontend build/deploy on main
 ├── terraform/
 │   ├── backend.tf
 │   ├── providers.tf
@@ -284,10 +333,18 @@ Long digests are automatically split into numbered SMS chunks `[1]`, `[2]`, etc.
 │   ├── layer/requirements.txt
 │   ├── gmail_webhook/handler.py
 │   ├── email_processor/handler.py
-│   ├── sns_dispatcher/handler.py
-│   ├── daily_digest/handler.py
-│   ├── weekly_digest/handler.py
+│   ├── sns_dispatcher/handler.py    # immediate alerts (Pushover + SMS)
+│   ├── daily_digest/handler.py      # weekday digest (Pushover + SMS)
+│   ├── weekly_digest/handler.py     # Sunday summary (Pushover + SMS)
+│   ├── subscribe/handler.py         # self-service subscription endpoint
 │   └── gmail_watch_refresh/handler.py
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx                  # React subscription portal (dark theme)
+│   │   └── App.css
+│   ├── public/Inbox-Ag.png
+│   ├── index.html
+│   └── package.json
 ├── scripts/
 │   ├── bootstrap.sh
 │   └── setup_gmail_oauth.py
