@@ -29,7 +29,7 @@ OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
-CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
+CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE", "CLOSE"}
 
 
 def _get_active_subscribers() -> list[dict]:

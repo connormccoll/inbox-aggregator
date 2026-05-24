@@ -83,7 +83,7 @@ Rules:
   - HOLD: hold recommendation
   - POSITIVE: positive/bullish mention without explicit buy
   - NEGATIVE: negative/bearish mention without explicit sell
-- If percent_closed = 100 or the alert says the position was closed, use action = CLOSE
+- CRITICAL: If percent_closed = 100, or the text says "Percent Closed: 100%", or the position is described as fully closed, action MUST be CLOSE — this overrides any "Buy" or "Sell" language in the position description. The "Buy MSTR $110 Put" style text is just describing what was originally traded (the position label), NOT a new recommendation.
 - confidence: HIGH (explicit rec), MEDIUM (implied), LOW (brief mention)
 - price_target: numeric if stated, else null
 - stop_loss_price: numeric if stated, else null
