@@ -249,6 +249,7 @@ module "lambda_sns_dispatcher" {
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
+    PUSHOVER_API_TOKEN    = var.pushover_api_token
   }
 
   inline_policies = {
@@ -304,6 +305,7 @@ module "lambda_daily_digest" {
     SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
+    PUSHOVER_API_TOKEN    = var.pushover_api_token
   }
 
   inline_policies = {
@@ -329,6 +331,7 @@ module "lambda_weekly_digest" {
     SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
+    PUSHOVER_API_TOKEN    = var.pushover_api_token
   }
 
   inline_policies = {

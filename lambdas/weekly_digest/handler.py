@@ -14,6 +14,8 @@ Holdings are cross-referenced so owned tickers are marked with a star (*).
 
 import logging
 import os
+import urllib.parse
+import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -31,6 +33,7 @@ OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
+PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
 # Max SMS length per segment × 2 segments; split digest into chunks if needed
 SMS_CHUNK_SIZE = 320
@@ -200,6 +203,17 @@ def _send_sms(phone_number: str, message: str) -> None:
     sns.publish(**kwargs)
 
 
+def _send_pushover(user_key: str, title: str, message: str) -> None:
+    data = urllib.parse.urlencode({
+        "token": PUSHOVER_API_TOKEN,
+        "user": user_key,
+        "title": title,
+        "message": message[:1024],
+    }).encode()
+    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
+    urllib.request.urlopen(req, timeout=10)
+
+
 def lambda_handler(event: dict, context) -> None:
     week_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logger.info("Running weekly digest for week of %s", week_str)
@@ -221,9 +235,17 @@ def lambda_handler(event: dict, context) -> None:
 
     for subscriber in subscribers:
         phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-        try:
-            for chunk in chunks:
-                _send_sms(phone, chunk)
-            logger.info("Weekly digest sent to %s (%d chunks)", phone, len(chunks))
-        except Exception as exc:
-            logger.error("Failed to send weekly digest to %s: %s", phone, exc)
+        pushover_user_key = subscriber.get("pushover_user_key", "")
+        if phone.startswith("+"):
+            try:
+                for chunk in chunks:
+                    _send_sms(phone, chunk)
+                logger.info("Weekly digest sent to %s (%d chunks)", phone, len(chunks))
+            except Exception as exc:
+                logger.error("Failed to send weekly digest to %s: %s", phone, exc)
+        if pushover_user_key and PUSHOVER_API_TOKEN:
+            try:
+                _send_pushover(pushover_user_key, f"[INBOX] Weekly Summary — {week_str}", digest)
+                logger.info("Weekly digest Pushover sent to %s", pushover_user_key)
+            except Exception as exc:
+                logger.error("Failed to send weekly Pushover to %s: %s", pushover_user_key, exc)

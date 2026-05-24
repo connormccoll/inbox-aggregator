@@ -9,6 +9,8 @@ assembles a plain-text digest, and sends it to all active subscribers.
 import json
 import logging
 import os
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 
 import boto3
@@ -24,6 +26,7 @@ sns = boto3.client("sns", region_name=region)
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
+PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
 # Ordering preference for digest sections
 ACTION_ORDER = ["STOP_LOSS", "SELL", "BUY", "HOLD", "POSITIVE", "NEGATIVE"]
@@ -94,6 +97,17 @@ def _send_sms(phone_number: str, message: str) -> None:
     sns.publish(**kwargs)
 
 
+def _send_pushover(user_key: str, title: str, message: str) -> None:
+    data = urllib.parse.urlencode({
+        "token": PUSHOVER_API_TOKEN,
+        "user": user_key,
+        "title": title,
+        "message": message,
+    }).encode()
+    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
+    urllib.request.urlopen(req, timeout=10)
+
+
 def lambda_handler(event: dict, context) -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logger.info("Running daily digest for date=%s", today)
@@ -111,8 +125,16 @@ def lambda_handler(event: dict, context) -> None:
 
     for subscriber in subscribers:
         phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-        try:
-            _send_sms(phone, digest)
-            logger.info("Digest SMS sent to %s", phone)
-        except Exception as exc:
-            logger.error("Failed to send digest to %s: %s", phone, exc)
+        pushover_user_key = subscriber.get("pushover_user_key", "")
+        if phone.startswith("+"):
+            try:
+                _send_sms(phone, digest)
+                logger.info("Digest SMS sent to %s", phone)
+            except Exception as exc:
+                logger.error("Failed to send digest to %s: %s", phone, exc)
+        if pushover_user_key and PUSHOVER_API_TOKEN:
+            try:
+                _send_pushover(pushover_user_key, f"[INBOX] Daily Digest {today}", digest)
+                logger.info("Digest Pushover sent to %s", pushover_user_key)
+            except Exception as exc:
+                logger.error("Failed to send Pushover digest to %s: %s", pushover_user_key, exc)

@@ -42,5 +42,11 @@ variable "weekly_digest_cron" {
 variable "origination_number" {
   description = "Toll-free origination phone number for SMS sends (E.164 format)."
   type        = string
-  default     = "+18882648390"
+  default     = ""
+}
+
+variable "pushover_api_token" {
+  description = "Pushover application API token for push notifications."
+  type        = string
+  default     = "aefv64pawrsxywpywddaprp8ugz7ih"
 }

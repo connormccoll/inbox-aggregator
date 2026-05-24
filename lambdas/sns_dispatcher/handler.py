@@ -9,6 +9,8 @@ If it is, sends an immediate SMS alert to all active subscribers.
 import json
 import logging
 import os
+import urllib.parse
+import urllib.request
 from decimal import Decimal
 
 import boto3
@@ -25,6 +27,7 @@ HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
+PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
 CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE"}
 
@@ -114,6 +117,17 @@ def _send_sms(phone_number: str, message: str) -> None:
     sns.publish(**kwargs)
 
 
+def _send_pushover(user_key: str, title: str, message: str) -> None:
+    data = urllib.parse.urlencode({
+        "token": PUSHOVER_API_TOKEN,
+        "user": user_key,
+        "title": title,
+        "message": message,
+    }).encode()
+    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
+    urllib.request.urlopen(req, timeout=10)
+
+
 def _unmarshal_rec(new_image: dict) -> dict:
     """Convert DynamoDB stream NewImage format to plain dict."""
     deserializer = boto3.dynamodb.types.TypeDeserializer()
@@ -154,9 +168,16 @@ def lambda_handler(event: dict, context) -> None:
 
         for subscriber in subscribers:
             phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-            try:
-                _send_sms(phone, message)
-                logger.info("SMS sent to %s for ticker=%s", phone, ticker)
-            except Exception as exc:
-                # Log and continue — don't fail the entire batch for one subscriber
-                logger.error("Failed to send SMS to %s: %s", phone, exc)
+            pushover_user_key = subscriber.get("pushover_user_key", "")
+            if phone.startswith("+"):
+                try:
+                    _send_sms(phone, message)
+                    logger.info("SMS sent to %s for ticker=%s", phone, ticker)
+                except Exception as exc:
+                    logger.error("Failed to send SMS to %s: %s", phone, exc)
+            if pushover_user_key and PUSHOVER_API_TOKEN:
+                try:
+                    _send_pushover(pushover_user_key, f"[INBOX] {ticker} {rec.get('action', '')}", message)
+                    logger.info("Pushover sent to %s for ticker=%s", pushover_user_key, ticker)
+                except Exception as exc:
+                    logger.error("Failed to send Pushover to %s: %s", pushover_user_key, exc)
