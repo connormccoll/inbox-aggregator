@@ -29,6 +29,6 @@ output "subscribers_table_name" {
 }
 
 output "frontend_url" {
-  description = "S3 static website URL for the subscription portal."
-  value       = "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"
+  description = "CloudFront HTTPS URL for the subscription portal."
+  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
 }
