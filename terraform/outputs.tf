@@ -32,3 +32,13 @@ output "frontend_url" {
   description = "CloudFront HTTPS URL for the subscription portal."
   value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
 }
+
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the frontend static assets."
+  value       = aws_s3_bucket.frontend.id
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (used for cache invalidations)."
+  value       = aws_cloudfront_distribution.frontend.id
+}
