@@ -75,16 +75,26 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
 }}
 
 Rules:
-- action must be one of: BUY, SELL, STOP_LOSS, HOLD, CLOSE, POSITIVE, NEGATIVE
-  - STOP_LOSS: TradeSmith or any stop-loss alert
-  - BUY: explicit buy recommendation (includes buying options contracts)
-  - SELL: explicit sell recommendation
-  - CLOSE: position closed or percent_closed = 100%
-  - HOLD: hold recommendation
-  - POSITIVE: positive/bullish mention without explicit buy
-  - NEGATIVE: negative/bearish mention without explicit sell
-- CRITICAL: If percent_closed = 100, or the text says "Percent Closed: 100%", or the position is described as fully closed, action MUST be CLOSE — this overrides any "Buy" or "Sell" language in the position description. The "Buy MSTR $110 Put" style text is just describing what was originally traded (the position label), NOT a new recommendation.
-- confidence: HIGH (explicit rec), MEDIUM (implied), LOW (brief mention)
+
+ACTION SELECTION — use the first matching rule:
+1. CLOSE: percent_closed = 100, or text says "Percent Closed: 100%", or position described as fully closed. CRITICAL override — takes priority over any other action word in the text. "Buy MSTR $110 Put" in a close alert is a position label, NOT a new recommendation.
+2. STOP_LOSS: stop-loss trigger or stop-loss alert from any source.
+3. SELL: explicit instruction to sell.
+4. BUY: explicit instruction to buy (including options contracts).
+5. HOLD: explicit hold recommendation.
+6. POSITIVE: the email is BULLISH on a specific named stock — earnings beats, raised guidance, "further upside", "strong momentum", "accelerating growth", analyst upgrades, bullish analysis focused on a named ticker. Use this for newsletter/research emails that analyse a stock favourably even without saying "buy".
+7. NEGATIVE: the email is BEARISH on a specific named stock — misses, warnings, downgrade language, "downside risk", bearish analysis focused on a named ticker.
+
+IMPORTANT — what counts as a recommendation:
+- Any email that analyses a specific stock and draws a bullish or bearish conclusion produces a POSITIVE or NEGATIVE recommendation for that ticker. You do NOT need an explicit "buy" or "sell" command.
+- Research newsletters, earnings analysis emails, and market commentary focused on a named stock ALWAYS produce at least a POSITIVE or NEGATIVE recommendation.
+- If the email is not related to stocks or investing (health, politics, advertising, lifestyle, retail promotions, etc.), return an empty recommendations array and do not attempt to extract anything.
+- Do NOT extract tickers from marketing or promotional emails that merely mention a company name in passing (e.g. "buy at Staples", "available on Apple devices"). A valid recommendation requires the email's PRIMARY purpose to be financial analysis or stock advice about that ticker.
+- Do NOT extract tickers from advertisement blocks, sponsored content, or unsubscribe footers embedded in otherwise relevant emails.
+
+OTHER RULES:
+- confidence: HIGH (explicit rec or very strong language), MEDIUM (implied or analytical), LOW (brief mention)
+- sentiment: the most informative bullish/bearish quote or data point from the email (e.g. "EPS beat by 790%, FCF of $4.8B exceeds full-year 2025")
 - price_target: numeric if stated, else null
 - stop_loss_price: numeric if stated, else null
 - instrument_type: STOCK or OPTION
@@ -93,12 +103,11 @@ Rules:
 - strike_price: numeric strike price if an option, else null
 - expiration_date: YYYY-MM-DD expiration if an option, else null
 - percent_closed: numeric percentage if stated (e.g. 100), else null
-- closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X as the newsletter name that originally issued the closed recommendation; else null
-- ticker: always the underlying stock symbol, not the option symbol (e.g. MSTR not MSTR260515P00110000)
+- closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X; else null
+- ticker: always the underlying stock symbol, not the option symbol
 - portfolio_update: only if the email contains a portfolio listing with holdings; null otherwise
-- source_name: the alert platform or email sender (e.g. TradeSmith), not the newsletter inside the email
+- source_name: the newsletter or publication name (e.g. "Banyan Hill", "Motley Fool"), NOT the forwarding sender
 - email_type: NEWSLETTER, STOP_LOSS_ALERT, PORTFOLIO_UPDATE, or OTHER
-- If no stock recommendations are found, return an empty recommendations array
 
 Email subject: {subject}
 Email from: {sender}
