@@ -171,17 +171,20 @@ def lambda_handler(event: dict, context) -> None:
 
         rec = _unmarshal_rec(new_image)
         ticker = rec.get("ticker", "").upper()
+        action = rec.get("action", "").upper()
         if not ticker:
             continue
 
         holdings = _get_holdings_for_ticker(ticker)
-        if not holdings:
+
+        # STOP_LOSS and SELL alerts fire regardless of holdings — skip ownership check
+        if action not in {"STOP_LOSS", "SELL"} and not holdings:
             logger.info("ticker=%s not in any portfolio — no immediate alert.", ticker)
             continue
 
-        # For close actions on owned positions, fetch original rec date from OpenPositions
+        # For close actions, fetch original rec date from OpenPositions
         open_position = None
-        if rec.get("action", "").upper() in CLOSE_ACTIONS:
+        if action in CLOSE_ACTIONS:
             open_position = _get_open_position(ticker, rec.get("source", ""))
 
         message = _format_sms(rec, holdings, open_position)
