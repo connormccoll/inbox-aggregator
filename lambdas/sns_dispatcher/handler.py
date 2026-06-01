@@ -172,14 +172,24 @@ def lambda_handler(event: dict, context) -> None:
         rec = _unmarshal_rec(new_image)
         ticker = rec.get("ticker", "").upper()
         action = rec.get("action", "").upper()
+        subject = rec.get("email_subject", "")
+        source = rec.get("source", "")
         if not ticker:
             continue
 
         holdings = _get_holdings_for_ticker(ticker)
 
-        # STOP_LOSS and SELL alerts fire regardless of holdings — skip ownership check
-        if action not in {"STOP_LOSS", "SELL"} and not holdings:
-            logger.info("ticker=%s not in any portfolio — no immediate alert.", ticker)
+        subject_lower = subject.lower()
+        source_lower = source.lower()
+        urgent_trigger = (
+            "urgent" in subject_lower
+            or "income matrix" in subject_lower
+            or "zach scheidt" in source_lower
+        )
+
+        # STOP_LOSS, SELL, and urgent-author alerts fire regardless of holdings — skip ownership check
+        if action not in {"STOP_LOSS", "SELL"} and not urgent_trigger and not holdings:
+            logger.info("ticker=%s saved for later, no immediate alert.", ticker)
             continue
 
         # For close actions, fetch original rec date from OpenPositions
