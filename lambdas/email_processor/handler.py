@@ -13,8 +13,10 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
+from email.utils import parseaddr
 
 import boto3
 from botocore.exceptions import ClientError
@@ -123,10 +125,10 @@ def _get_email_content(message_id: str) -> dict:
 
     headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
     subject = headers.get("subject", "")
-    sender = headers.get("from", "")
     date_str = headers.get("date", "")
 
     body_text = _extract_body(msg["payload"])
+    sender = _infer_sender_name(headers.get("from", ""), subject, body_text)
 
     return {
         "message_id": message_id,
@@ -158,6 +160,32 @@ def _extract_body(payload: dict) -> str:
     return ""
 
 
+def _infer_sender_name(from_header: str, subject: str, body_text: str) -> str:
+    """Prefer a human or newsletter name over the raw email address."""
+    display_name, _ = parseaddr(from_header)
+    sender_name = display_name.strip() if display_name.strip() else from_header.strip()
+
+    body_sample = "\n".join(body_text.splitlines()[:200])
+    candidates = [
+        r"(?im)^\s*(?:by|from|written by)\s+([A-Z][A-Za-z0-9 .,&'\-]{2,80})\s*$",
+        r"(?im)^\s*(?:author|newsletter)\s*[:\-]\s*([A-Z][A-Za-z0-9 .,&'\-]{2,80})\s*$",
+        r"(?ims)^\s*(?:best|regards|sincerely|thanks|thank you),?\s*\n\s*([A-Z][A-Za-z0-9 .,&'\-]{2,80})\s*$",
+    ]
+
+    for pattern in candidates:
+        match = re.search(pattern, body_sample)
+        if match:
+            inferred = match.group(1).strip().strip("-—:,. ")
+            if inferred and len(inferred) <= 80:
+                return inferred
+
+    subject_hint = re.search(r"(?i)\b(Income Matrix|Urgent|Zach Scheidt)\b", subject)
+    if subject_hint:
+        return subject_hint.group(1)
+
+    return sender_name
+
+
 def _mark_processed(table, message_id: str) -> bool:
     """
     Atomically insert message_id. Returns True if newly inserted,
@@ -181,7 +209,6 @@ def _mark_processed(table, message_id: str) -> bool:
 
 
 def _extract_with_bedrock(email: dict) -> dict:
-    import re
     prompt = EXTRACTION_PROMPT.format(
         subject=email["subject"],
         sender=email["sender"],
