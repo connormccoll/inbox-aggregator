@@ -51,46 +51,6 @@ resource "aws_dynamodb_table" "recommendations" {
 }
 
 # ──────────────────────────────────────────────
-# Holdings table
-# PK: PORTFOLIO#<name>  SK: TICKER#<ticker>
-# GSI: TickerIndex — PK: TICKER#<ticker>  SK: PORTFOLIO#<name>
-# ──────────────────────────────────────────────
-resource "aws_dynamodb_table" "holdings" {
-  name         = "${local.prefix}-holdings"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "PK"
-  range_key    = "SK"
-
-  attribute {
-    name = "PK"
-    type = "S"
-  }
-  attribute {
-    name = "SK"
-    type = "S"
-  }
-  attribute {
-    name = "ticker_pk"
-    type = "S"
-  }
-  attribute {
-    name = "portfolio_sk"
-    type = "S"
-  }
-
-  global_secondary_index {
-    name            = "TickerIndex"
-    hash_key        = "ticker_pk"
-    range_key       = "portfolio_sk"
-    projection_type = "ALL"
-  }
-
-  tags = {
-    Name = "${local.prefix}-holdings"
-  }
-}
-
-# ──────────────────────────────────────────────
 # Subscribers table
 # PK: SUBSCRIBER#<phone>
 # GSI: StatusIndex — PK: status  SK: PK (phone)

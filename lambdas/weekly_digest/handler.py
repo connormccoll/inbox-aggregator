@@ -8,8 +8,6 @@ Scans the OpenPositions table to build a comprehensive weekly summary:
   - Recently CLOSED positions (within last 7 days) flagged as "CLOSE ALERT"
     to remind subscribers that a source exited or stopped out. CLOSED rows
     auto-purge via DynamoDB TTL after 7 days.
-
-Holdings are cross-referenced so owned tickers are marked with a star (*).
 """
 
 import logging
@@ -20,7 +18,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -30,7 +28,6 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 sns = boto3.client("sns", region_name=region)
 
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
-HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
@@ -52,27 +49,6 @@ def _scan_open_positions() -> list[dict]:
     return items
 
 
-def _get_owned_tickers() -> set[str]:
-    """Scan Holdings table and return all tickers currently tracked."""
-    table = dynamodb.Table(HOLDINGS_TABLE)
-    owned = set()
-    resp = table.scan(ProjectionExpression="SK")
-    for item in resp.get("Items", []):
-        sk = item.get("SK", "")
-        if sk.startswith("TICKER#"):
-            owned.add(sk.removeprefix("TICKER#"))
-    while "LastEvaluatedKey" in resp:
-        resp = table.scan(
-            ExclusiveStartKey=resp["LastEvaluatedKey"],
-            ProjectionExpression="SK",
-        )
-        for item in resp.get("Items", []):
-            sk = item.get("SK", "")
-            if sk.startswith("TICKER#"):
-                owned.add(sk.removeprefix("TICKER#"))
-    return owned
-
-
 def _get_active_subscribers() -> list[dict]:
     table = dynamodb.Table(SUBSCRIBERS_TABLE)
     resp = table.query(
@@ -82,12 +58,12 @@ def _get_active_subscribers() -> list[dict]:
     return resp.get("Items", [])
 
 
-def _build_weekly_digest(positions: list[dict], owned_tickers: set[str], week_str: str) -> str:
+def _build_weekly_digest(positions: list[dict], week_str: str) -> str:
     """
     Build the weekly digest text.
 
-    OPEN section: group by ticker, sorted with owned tickers first then alpha.
-    CLOSE ALERTS section: positions that went CLOSED this week, owned tickers only.
+    OPEN section: group by ticker alphabetically.
+    CLOSE ALERTS section: all positions that went CLOSED this week.
     """
     open_by_ticker: dict[str, list[dict]] = defaultdict(list)
     close_alerts: dict[str, list[dict]] = defaultdict(list)
@@ -107,16 +83,10 @@ def _build_weekly_digest(positions: list[dict], owned_tickers: set[str], week_st
         lines.append("")
         lines.append("OPEN RECOMMENDATIONS:")
 
-        # Owned tickers first, then the rest alphabetically
-        sorted_tickers = sorted(
-            open_by_ticker.keys(),
-            key=lambda t: (0 if t in owned_tickers else 1, t),
-        )
+        sorted_tickers = sorted(open_by_ticker.keys())
 
         for ticker in sorted_tickers:
             recs = open_by_ticker[ticker]
-            owned_marker = "*" if ticker in owned_tickers else " "
-
             # Build per-source summary: "Source (confidence, since YYYY-MM-DD)"
             source_parts = []
             for r in sorted(recs, key=lambda x: x.get("first_rec_date", "")):
@@ -127,30 +97,29 @@ def _build_weekly_digest(positions: list[dict], owned_tickers: set[str], week_st
                 source_parts.append(f"{source}/{action}/{confidence} since {first_date}")
 
             sources_str = " | ".join(source_parts)
-            lines.append(f"{owned_marker}{ticker}: {sources_str}")
+            lines.append(f"{ticker}: {sources_str}")
     else:
         lines.append("No open recommendations this week.")
 
-    # ── Close alerts (owned positions only) ────────────────────────────────
-    owned_close_alerts = {t: recs for t, recs in close_alerts.items() if t in owned_tickers}
-    if owned_close_alerts:
+    # ── Close alerts ───────────────────────────────────────────────────────
+    if close_alerts:
         lines.append("")
-        lines.append("CLOSE ALERTS (owned positions):")
-        for ticker in sorted(owned_close_alerts.keys()):
-            for r in owned_close_alerts[ticker]:
+        lines.append("CLOSE ALERTS:")
+        for ticker in sorted(close_alerts.keys()):
+            for r in close_alerts[ticker]:
                 source = r.get("source", "?")
                 close_action = r.get("close_action", r.get("action", "?"))
                 close_date = r.get("close_date", "?")
                 first_date = r.get("first_rec_date", "?")
                 lines.append(
-                    f"*{ticker} {close_action} by {source} on {close_date} (rec'd since {first_date})"
+                    f"{ticker} {close_action} by {source} on {close_date} (rec'd since {first_date})"
                 )
 
     # ── Footer ──────────────────────────────────────────────────────────────
     total_open = sum(len(v) for v in open_by_ticker.values())
     total_tickers = len(open_by_ticker)
     lines.append("")
-    lines.append(f"Total: {total_open} open recs across {total_tickers} tickers. * = owned position.")
+    lines.append(f"Total: {total_open} open recs across {total_tickers} tickers.")
 
     return "\n".join(lines)
 
@@ -221,15 +190,12 @@ def lambda_handler(event: dict, context) -> None:
     positions = _scan_open_positions()
     logger.info("Found %d open-position rows", len(positions))
 
-    owned_tickers = _get_owned_tickers()
-    logger.info("Owned tickers: %s", owned_tickers)
-
     subscribers = _get_active_subscribers()
     if not subscribers:
         logger.info("No active subscribers — weekly digest not sent.")
         return
 
-    digest = _build_weekly_digest(positions, owned_tickers, week_str)
+    digest = _build_weekly_digest(positions, week_str)
     chunks = _chunk_message(digest)
     logger.info("Weekly digest: %d chunks, %d chars total", len(chunks), len(digest))
 

@@ -6,7 +6,7 @@ SQS-triggered Lambda. For each message ID:
   2. Atomically mark as processed in DynamoDB (dedup)
   3. Invoke Bedrock Claude to extract stock recommendations + portfolio data
   4. Write Recommendations to DynamoDB
-  5. Upsert Holdings to DynamoDB (if portfolio update found)
+    5. Update OpenPositions to maintain open/closed recommendation state
 """
 
 import base64
@@ -31,7 +31,6 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 bedrock = boto3.client("bedrock-runtime", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
-HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 PROCESSED_EMAILS_TABLE = os.environ["PROCESSED_EMAILS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
@@ -66,12 +65,6 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
       "closed_by": null
     }}
   ],
-  "portfolio_update": {{
-    "portfolio_name": "Growth Portfolio",
-    "holdings": [
-      {{"ticker": "AAPL", "shares": 100}}
-    ]
-  }},
   "source_name": "TradeSmith",
   "email_type": "STOP_LOSS_ALERT"
 }}
@@ -107,9 +100,9 @@ OTHER RULES:
 - percent_closed: numeric percentage if stated (e.g. 100), else null
 - closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X; else null
 - ticker: always the underlying stock symbol, not the option symbol
-- portfolio_update: only if the email contains a portfolio listing with holdings; null otherwise
 - source_name: the newsletter or publication name (e.g. "Banyan Hill", "Motley Fool"), NOT the forwarding sender
 - email_type: NEWSLETTER, STOP_LOSS_ALERT, PORTFOLIO_UPDATE, or OTHER
+- ticker must be explicitly present in the email text as a stock symbol (e.g. AAPL, TSLA, NVDA, or NASDAQ:AAPL / NYSE:GEV). Do not infer ticker symbols from company names alone (e.g. Apple, Staples).
 
 Email subject: {subject}
 Email from: {sender}
@@ -334,7 +327,15 @@ def _update_open_positions(
                 ticker, source, action, "OPEN" if action in OPEN_ACTIONS else "CLOSED")
 
 
-def _write_recommendations(recommendations_table, holdings_table, open_positions_table, email: dict, extracted: dict) -> None:
+def _has_ticker_evidence(ticker: str, email: dict) -> bool:
+    """Require explicit ticker-symbol evidence in subject/body to reduce false positives."""
+    subject = email.get("subject", "")
+    body = email.get("body", "")
+    text = f"{subject}\n{body}"
+    return bool(re.search(rf"(?<![A-Z0-9]){re.escape(ticker)}(?![A-Z0-9])", text))
+
+
+def _write_recommendations(recommendations_table, open_positions_table, email: dict, extracted: dict) -> None:
     email_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     message_id = email["message_id"]
     source_name = extracted.get("source_name", "Unknown")
@@ -343,6 +344,9 @@ def _write_recommendations(recommendations_table, holdings_table, open_positions
     for rec in extracted.get("recommendations", []):
         ticker = rec.get("ticker", "").upper().strip()
         if not ticker:
+            continue
+        if not _has_ticker_evidence(ticker, email):
+            logger.info("Skipping recommendation without explicit ticker evidence: ticker=%s subject=%r", ticker, email.get("subject", ""))
             continue
 
         action = rec.get("action", "UNKNOWN").upper()
@@ -395,35 +399,6 @@ def _write_recommendations(recommendations_table, holdings_table, open_positions
         recommendations_table.put_item(Item=item)
         logger.info("Wrote recommendation: ticker=%s action=%s source=%s", ticker, action, source_name)
 
-    # Update portfolio holdings if present
-    portfolio_update = extracted.get("portfolio_update")
-    if portfolio_update and isinstance(portfolio_update, dict):
-        portfolio_name = portfolio_update.get("portfolio_name", "Default")
-        holdings = portfolio_update.get("holdings", [])
-        updated_at = datetime.now(timezone.utc).isoformat()
-
-        for holding in holdings:
-            ticker = holding.get("ticker", "").upper().strip()
-            shares = holding.get("shares")
-            if not ticker:
-                continue
-
-            holdings_table.put_item(
-                Item={
-                    "PK": f"PORTFOLIO#{portfolio_name}",
-                    "SK": f"TICKER#{ticker}",
-                    # GSI keys
-                    "ticker_pk": f"TICKER#{ticker}",
-                    "portfolio_sk": f"PORTFOLIO#{portfolio_name}",
-                    # Data
-                    "ticker": ticker,
-                    "portfolio_name": portfolio_name,
-                    "shares": str(shares) if shares is not None else None,
-                    "last_updated": updated_at,
-                }
-            )
-            logger.info("Upserted holding: portfolio=%s ticker=%s shares=%s", portfolio_name, ticker, shares)
-
 
 def lambda_handler(event: dict, context) -> dict:
     """
@@ -431,13 +406,11 @@ def lambda_handler(event: dict, context) -> dict:
     """
     processed_emails_table = dynamodb.Table(PROCESSED_EMAILS_TABLE)
     recommendations_table = dynamodb.Table(RECOMMENDATIONS_TABLE)
-    holdings_table = dynamodb.Table(HOLDINGS_TABLE)
     open_positions_table = dynamodb.Table(OPEN_POSITIONS_TABLE)
 
     failed_items = []
 
     for record in event.get("Records", []):
-        receipt_handle = record["receiptHandle"]
         item_id = record["messageId"]
 
         try:
@@ -456,13 +429,12 @@ def lambda_handler(event: dict, context) -> dict:
             # Step 3: Extract with Bedrock
             extracted = _extract_with_bedrock(email)
             logger.info(
-                "Extraction result: %d recommendations, portfolio_update=%s",
+                "Extraction result: %d recommendations",
                 len(extracted.get("recommendations", [])),
-                bool(extracted.get("portfolio_update")),
             )
 
             # Step 4: Write to DynamoDB
-            _write_recommendations(recommendations_table, holdings_table, open_positions_table, email, extracted)
+            _write_recommendations(recommendations_table, open_positions_table, email, extracted)
 
         except Exception as exc:
             logger.exception("Failed to process SQS record messageId=%s: %s", item_id, exc)

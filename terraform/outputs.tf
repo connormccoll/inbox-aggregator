@@ -18,11 +18,6 @@ output "recommendations_table_name" {
   value       = module.dynamodb.recommendations_table_name
 }
 
-output "holdings_table_name" {
-  description = "DynamoDB Holdings table name."
-  value       = module.dynamodb.holdings_table_name
-}
-
 output "subscribers_table_name" {
   description = "DynamoDB Subscribers table name."
   value       = module.dynamodb.subscribers_table_name

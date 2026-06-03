@@ -96,8 +96,6 @@ data "aws_iam_policy_document" "dynamodb_readwrite" {
     resources = [
       module.dynamodb.recommendations_table_arn,
       "${module.dynamodb.recommendations_table_arn}/index/*",
-      module.dynamodb.holdings_table_arn,
-      "${module.dynamodb.holdings_table_arn}/index/*",
       module.dynamodb.subscribers_table_arn,
       "${module.dynamodb.subscribers_table_arn}/index/*",
       module.dynamodb.processed_emails_table_arn,
@@ -203,7 +201,6 @@ module "lambda_email_processor" {
 
   environment_variables = {
     RECOMMENDATIONS_TABLE    = module.dynamodb.recommendations_table_name
-    HOLDINGS_TABLE           = module.dynamodb.holdings_table_name
     PROCESSED_EMAILS_TABLE   = module.dynamodb.processed_emails_table_name
     OPEN_POSITIONS_TABLE     = module.dynamodb.open_positions_table_name
     GMAIL_SECRET_NAME        = module.secrets.gmail_secret_name
@@ -244,7 +241,7 @@ resource "aws_iam_role_policy" "email_processor_sqs_receive" {
 
 # ──────────────────────────────────────────────
 # Lambda: sns-dispatcher
-# DynamoDB Streams consumer; checks Holdings → sends SMS
+# DynamoDB Streams consumer; sends immediate alerts
 # ──────────────────────────────────────────────
 module "lambda_sns_dispatcher" {
   source        = "./modules/lambda"
@@ -254,7 +251,6 @@ module "lambda_sns_dispatcher" {
   layer_arns    = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
-    HOLDINGS_TABLE        = module.dynamodb.holdings_table_name
     SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
     AWS_REGION_NAME       = var.aws_region
@@ -337,7 +333,6 @@ module "lambda_weekly_digest" {
 
   environment_variables = {
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
-    HOLDINGS_TABLE        = module.dynamodb.holdings_table_name
     SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number

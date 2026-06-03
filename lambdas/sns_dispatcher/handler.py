@@ -2,16 +2,13 @@
 sns_dispatcher/handler.py
 
 DynamoDB Streams consumer. Fires on INSERT events from the Recommendations table.
-For each new recommendation, checks if the ticker is in any tracked portfolio.
-If it is, sends an immediate SMS alert to all active subscribers.
+Sends immediate alerts to active subscribers based on action and urgency rules.
 """
 
-import json
 import logging
 import os
 import urllib.parse
 import urllib.request
-from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -23,7 +20,6 @@ region = os.environ["AWS_REGION_NAME"]
 dynamodb = boto3.resource("dynamodb", region_name=region)
 sns = boto3.client("sns", region_name=region)
 
-HOLDINGS_TABLE = os.environ["HOLDINGS_TABLE"]
 SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
@@ -41,16 +37,6 @@ def _get_active_subscribers() -> list[dict]:
     return resp.get("Items", [])
 
 
-def _get_holdings_for_ticker(ticker: str) -> list[dict]:
-    """Query TickerIndex GSI to find all portfolios that hold this ticker."""
-    table = dynamodb.Table(HOLDINGS_TABLE)
-    resp = table.query(
-        IndexName="TickerIndex",
-        KeyConditionExpression=Key("ticker_pk").eq(f"TICKER#{ticker}"),
-    )
-    return resp.get("Items", [])
-
-
 def _get_open_position(ticker: str, source: str) -> dict | None:
     """Fetch OpenPositions row for a specific ticker+source to get original rec date."""
     table = dynamodb.Table(OPEN_POSITIONS_TABLE)
@@ -60,7 +46,7 @@ def _get_open_position(ticker: str, source: str) -> dict | None:
     return resp.get("Item")
 
 
-def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = None) -> str:
+def _format_sms(rec: dict, open_position: dict | None = None) -> str:
     """Format a concise alert message."""
     ticker = rec.get("ticker", "")
     action = rec.get("action", "")
@@ -75,17 +61,6 @@ def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = No
     strike_price = rec.get("strike_price")
     expiration_date = rec.get("expiration_date")
     closed_by = rec.get("closed_by")
-
-    # Portfolio context
-    portfolio_lines = []
-    for h in holdings:
-        name = h.get("portfolio_name", "")
-        shares = h.get("shares")
-        if shares:
-            portfolio_lines.append(f"{name} ({shares} shares)")
-        else:
-            portfolio_lines.append(name)
-    portfolio_str = ", ".join(portfolio_lines)
 
     lines = [f"[INBOX] {action}: {ticker} | {source}"]
 
@@ -104,7 +79,6 @@ def _format_sms(rec: dict, holdings: list[dict], open_position: dict | None = No
         lines.append(f"Target: ${price_target}")
     if sentiment:
         lines.append(f'"{sentiment}"')
-    lines.append(f"Portfolio: {portfolio_str}")
     lines.append(email_date)
 
     # For close actions, show who originally recommended it and when
@@ -177,8 +151,6 @@ def lambda_handler(event: dict, context) -> None:
         if not ticker:
             continue
 
-        holdings = _get_holdings_for_ticker(ticker)
-
         subject_lower = subject.lower()
         source_lower = source.lower()
         urgent_trigger = (
@@ -187,9 +159,10 @@ def lambda_handler(event: dict, context) -> None:
             or "zach scheidt" in source_lower
         )
 
-        # STOP_LOSS, SELL, and urgent-author alerts fire regardless of holdings — skip ownership check
-        if action not in {"STOP_LOSS", "SELL"} and not urgent_trigger and not holdings:
-            logger.info("ticker=%s saved for later, no immediate alert.", ticker)
+        # Immediate dispatch for actionable/urgent recommendations.
+        immediate_actions = {"BUY", "SELL", "STOP_LOSS", "CLOSE", "POSITIVE", "NEGATIVE", "HOLD"}
+        if action not in immediate_actions and not urgent_trigger:
+            logger.info("ticker=%s action=%s not configured for immediate alert.", ticker, action)
             continue
 
         # For close actions, fetch original rec date from OpenPositions
@@ -197,7 +170,7 @@ def lambda_handler(event: dict, context) -> None:
         if action in CLOSE_ACTIONS:
             open_position = _get_open_position(ticker, rec.get("source", ""))
 
-        message = _format_sms(rec, holdings, open_position)
+        message = _format_sms(rec, open_position)
         logger.info("Sending immediate alert for ticker=%s to %d subscribers", ticker, len(subscribers))
 
         for subscriber in subscribers:

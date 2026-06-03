@@ -10,14 +10,6 @@ output "recommendations_stream_arn" {
   value = aws_dynamodb_table.recommendations.stream_arn
 }
 
-output "holdings_table_name" {
-  value = aws_dynamodb_table.holdings.name
-}
-
-output "holdings_table_arn" {
-  value = aws_dynamodb_table.holdings.arn
-}
-
 output "subscribers_table_name" {
   value = aws_dynamodb_table.subscribers.name
 }
