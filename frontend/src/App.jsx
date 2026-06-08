@@ -13,7 +13,7 @@ const CHAT_QUERY = `
 `
 
 export default function App() {
-  const [view, setView] = useState('subscribe') // 'subscribe' | 'chat'
+  const [view, setView] = useState('chat') // 'subscribe' | 'chat'
   const [step, setStep] = useState('password') // 'password' | 'form' | 'success'
   const [password, setPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
