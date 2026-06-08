@@ -49,6 +49,29 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+.view-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #94a3b8;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle-btn.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
 .form {
   text-align: left;
 }
@@ -250,4 +273,78 @@ h1 {
 .success .small {
   font-size: 0.82rem;
   color: #475569;
+}
+
+.chat-panel {
+  text-align: left;
+}
+
+.chat-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 88px;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1.5px solid #1e2a3a;
+  background: #0d1117;
+  color: #e2e8f0;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.chat-form textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.chat-result {
+  border-top: 1px solid #1e2a3a;
+  margin-top: 0.25rem;
+  padding-top: 1rem;
+}
+
+.chat-result h3 {
+  font-size: 0.95rem;
+  color: #cbd5e1;
+  margin-bottom: 0.4rem;
+}
+
+.chat-summary {
+  color: #94a3b8;
+  font-size: 0.88rem;
+  margin-bottom: 0.7rem;
+}
+
+.chat-empty {
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.chat-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+}
+
+.chat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.chat-table th,
+.chat-table td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid #1e2a3a;
+}
+
+.chat-table th {
+  color: #94a3b8;
+  background: #101622;
+  font-weight: 600;
+}
+
+.chat-table td {
+  color: #d6deea;
 }

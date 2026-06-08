@@ -2,8 +2,18 @@ import { useState } from 'react'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
+const CHAT_QUERY = `
+  query ChatQuery($prompt: String!) {
+    chatQuery(prompt: $prompt) {
+      summary
+      intent
+      rows
+    }
+  }
+`
 
 export default function App() {
+  const [view, setView] = useState('subscribe') // 'subscribe' | 'chat'
   const [step, setStep] = useState('password') // 'password' | 'form' | 'success'
   const [password, setPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
@@ -18,6 +28,10 @@ export default function App() {
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [chatPrompt, setChatPrompt] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState('')
+  const [chatResult, setChatResult] = useState(null)
 
   function handlePasswordSubmit(e) {
     e.preventDefault()
@@ -74,14 +88,97 @@ export default function App() {
     }
   }
 
+  async function handleChatSubmit(e) {
+    e.preventDefault()
+    if (!chatPrompt.trim()) {
+      setChatError('Enter a question to query recommendations.')
+      return
+    }
+
+    setChatError('')
+    setChatLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/graphql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: CHAT_QUERY,
+          variables: { prompt: chatPrompt.trim() },
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || data.errors?.length) {
+        setChatResult(null)
+        setChatError(data.errors?.[0]?.message || 'Query failed. Please try again.')
+        return
+      }
+
+      setChatResult(data.data?.chatQuery || null)
+    } catch {
+      setChatResult(null)
+      setChatError('Network error while querying chat endpoint.')
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  function renderChatRows(rows) {
+    if (!rows || rows.length === 0) {
+      return <p className="chat-empty">No matching rows found.</p>
+    }
+
+    return (
+      <div className="chat-table-wrap">
+        <table className="chat-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Action</th>
+              <th>Source</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <tr key={`${row.PK || row.ticker || 'row'}-${idx}`}>
+                <td>{row.ticker || String(row.PK || '').replace('TICKER#', '') || '-'}</td>
+                <td>{row.action || row.close_action || '-'}</td>
+                <td>{row.source || '-'}</td>
+                <td>{row.email_date || row.close_date || row.latest_rec_date || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   return (
     <div className="container">
       <div className="card">
         <img src="/Inbox-Ag.png" alt="Inbox Aggregator" className="logo" />
         <h1>Inbox Aggregator</h1>
-        <p className="tagline">Stock alert notifications</p>
+        <p className="tagline">Stock alert notifications and query chat</p>
 
-        {step === 'password' && (
+        <div className="view-toggle" role="tablist" aria-label="Portal view">
+          <button
+            type="button"
+            className={`toggle-btn ${view === 'subscribe' ? 'active' : ''}`}
+            onClick={() => setView('subscribe')}
+          >
+            Subscribe
+          </button>
+          <button
+            type="button"
+            className={`toggle-btn ${view === 'chat' ? 'active' : ''}`}
+            onClick={() => setView('chat')}
+          >
+            Chat
+          </button>
+        </div>
+
+        {view === 'subscribe' && step === 'password' && (
           <form onSubmit={handlePasswordSubmit} className="form">
             <p className="intro">Enter your invitation password to continue.</p>
             <div className="field">
@@ -99,7 +196,7 @@ export default function App() {
           </form>
         )}
 
-        {step === 'form' && (
+        {view === 'subscribe' && step === 'form' && (
           <form onSubmit={handleSubmit} className="form">
             <p className="intro">Fill out the form below to receive stock alert notifications.</p>
 
@@ -245,7 +342,7 @@ export default function App() {
           </form>
         )}
 
-        {step === 'success' && (
+        {view === 'subscribe' && step === 'success' && (
           <div className="success">
             <div className="success-icon">✓</div>
             <h2>You&apos;re subscribed!</h2>
@@ -256,6 +353,34 @@ export default function App() {
             <p className="small">
               To unsubscribe, reply <strong>STOP</strong> to any SMS message.
             </p>
+          </div>
+        )}
+
+        {view === 'chat' && (
+          <div className="chat-panel">
+            <p className="intro">
+              Ask things like: "recommendations for TSLA", "when did Brownstone close MSTR?"
+            </p>
+            <form onSubmit={handleChatSubmit} className="chat-form">
+              <textarea
+                value={chatPrompt}
+                onChange={e => setChatPrompt(e.target.value)}
+                placeholder="Ask about recommendations or close events..."
+                rows={3}
+              />
+              {chatError && <div className="submit-error">{chatError}</div>}
+              <button type="submit" className="btn-primary" disabled={chatLoading}>
+                {chatLoading ? 'Querying…' : 'Ask'}
+              </button>
+            </form>
+
+            {chatResult && (
+              <div className="chat-result">
+                <h3>Result</h3>
+                <p className="chat-summary">{chatResult.summary || 'Query completed.'}</p>
+                {renderChatRows(chatResult.rows || [])}
+              </div>
+            )}
           </div>
         )}
       </div>

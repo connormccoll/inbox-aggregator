@@ -392,6 +392,27 @@ module "lambda_subscribe" {
 }
 
 # ──────────────────────────────────────────────
+# Lambda: graphql-query
+# API Gateway POST /graphql; read-only recommendation and close-event queries
+# ──────────────────────────────────────────────
+module "lambda_graphql_query" {
+  source        = "./modules/lambda"
+  function_name = "${local.prefix}-graphql-query"
+  source_dir    = "${path.module}/../lambdas/graphql_query"
+  timeout       = 20
+
+  environment_variables = {
+    RECOMMENDATIONS_TABLE = module.dynamodb.recommendations_table_name
+    OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
+    AWS_REGION_NAME       = var.aws_region
+  }
+
+  inline_policies = {
+    dynamodb-readwrite = data.aws_iam_policy_document.dynamodb_readwrite.json
+  }
+}
+
+# ──────────────────────────────────────────────
 # API Gateway (depends on gmail-webhook Lambda)
 # ──────────────────────────────────────────────
 module "api_gateway" {
@@ -400,6 +421,8 @@ module "api_gateway" {
   gmail_webhook_lambda_invoke_arn = module.lambda_gmail_webhook.invoke_arn
   subscribe_lambda_arn            = module.lambda_subscribe.function_arn
   subscribe_lambda_invoke_arn     = module.lambda_subscribe.invoke_arn
+  graphql_lambda_arn              = module.lambda_graphql_query.function_arn
+  graphql_lambda_invoke_arn       = module.lambda_graphql_query.invoke_arn
   environment                     = var.environment
 }
 

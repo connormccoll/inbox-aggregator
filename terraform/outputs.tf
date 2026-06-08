@@ -8,6 +8,11 @@ output "gmail_push_endpoint" {
   value       = "${module.api_gateway.base_url}/gmail-push"
 }
 
+output "graphql_endpoint" {
+  description = "GraphQL-style endpoint for chat and table queries."
+  value       = "${module.api_gateway.base_url}/graphql"
+}
+
 output "email_processing_queue_url" {
   description = "SQS queue URL for email processing."
   value       = module.sqs.queue_url
