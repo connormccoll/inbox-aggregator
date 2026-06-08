@@ -28,6 +28,7 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
+CLOSE_ACTIONS = {"CLOSE", "SELL", "STOP_LOSS", "NEGATIVE"}
 
 TICKER_STOPWORDS = {
     "A",
@@ -171,16 +172,44 @@ def _query_recommendations(ticker: str, limit: int = 20) -> list[dict]:
 
 
 def _query_close_events(ticker: str, source_filter: str | None = None) -> list[dict]:
-    table = dynamodb.Table(OPEN_POSITIONS_TABLE)
-    resp = table.query(KeyConditionExpression=Key("PK").eq(f"TICKER#{ticker}"))
+    rec_table = dynamodb.Table(RECOMMENDATIONS_TABLE)
+    rec_resp = rec_table.query(
+        KeyConditionExpression=Key("PK").eq(f"TICKER#{ticker}"),
+        ScanIndexForward=False,
+        Limit=100,
+    )
+
+    open_table = dynamodb.Table(OPEN_POSITIONS_TABLE)
+    open_resp = open_table.query(KeyConditionExpression=Key("PK").eq(f"TICKER#{ticker}"))
+    open_by_source = {
+        str(item.get("source", "")): item
+        for item in open_resp.get("Items", [])
+    }
 
     rows = []
-    for item in resp.get("Items", []):
-        if item.get("open_status") != "CLOSED":
+    for rec in rec_resp.get("Items", []):
+        action = str(rec.get("action", "")).upper()
+        if action not in CLOSE_ACTIONS:
             continue
-        if source_filter and source_filter.lower() not in str(item.get("source", "")).lower():
+
+        source = str(rec.get("source", ""))
+        if source_filter and source_filter.lower() not in source.lower():
             continue
-        rows.append(item)
+
+        open_row = open_by_source.get(source, {})
+        rows.append({
+            "ticker": rec.get("ticker"),
+            "source": source,
+            "close_action": action,
+            "close_date": rec.get("email_date"),
+            "first_rec_date": open_row.get("first_rec_date"),
+            "latest_rec_date": open_row.get("latest_rec_date") or rec.get("email_date"),
+            "confidence": rec.get("confidence") or open_row.get("confidence"),
+            "open_status": open_row.get("open_status") or "CLOSED",
+            "rec_count": open_row.get("rec_count"),
+            "sentiment": rec.get("sentiment"),
+            "email_subject": rec.get("email_subject"),
+        })
 
     rows.sort(key=lambda x: str(x.get("close_date", "")), reverse=True)
     return rows
@@ -192,6 +221,7 @@ def _format_recommendation_row(item: dict) -> dict:
         "action": item.get("action"),
         "source": item.get("source"),
         "email_date": item.get("email_date"),
+        "email_subject": item.get("email_subject"),
         "confidence": item.get("confidence"),
         "sentiment": item.get("sentiment"),
         "price_target": item.get("price_target"),
@@ -212,6 +242,8 @@ def _format_close_row(item: dict) -> dict:
         "confidence": item.get("confidence"),
         "open_status": item.get("open_status"),
         "rec_count": item.get("rec_count"),
+        "sentiment": item.get("sentiment"),
+        "email_subject": item.get("email_subject"),
     }
 
 

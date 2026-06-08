@@ -145,12 +145,16 @@ export default function App() {
                   <th>Latest Rec</th>
                   <th>Confidence</th>
                   <th>Rec Count</th>
+                  <th>Sentiment</th>
+                  <th>Email Subject</th>
                 </>
               ) : (
                 <>
                   <th>Action</th>
                   <th>Date</th>
                   <th>Confidence</th>
+                  <th>Sentiment</th>
+                  <th>Email Subject</th>
                   <th>Target</th>
                   <th>Stop</th>
                   <th>Instrument</th>
@@ -172,12 +176,16 @@ export default function App() {
                     <td>{row.latest_rec_date || '-'}</td>
                     <td>{row.confidence || '-'}</td>
                     <td>{row.rec_count ?? '-'}</td>
+                    <td>{row.sentiment || '-'}</td>
+                    <td>{row.email_subject || '-'}</td>
                   </>
                 ) : (
                   <>
                     <td>{row.action || '-'}</td>
                     <td>{row.email_date || '-'}</td>
                     <td>{row.confidence || '-'}</td>
+                    <td>{row.sentiment || '-'}</td>
+                    <td>{row.email_subject || '-'}</td>
                     <td>{row.price_target || '-'}</td>
                     <td>{row.stop_loss_price || '-'}</td>
                     <td>{row.instrument_type || '-'}</td>

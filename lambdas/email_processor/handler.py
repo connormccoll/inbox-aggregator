@@ -65,8 +65,7 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
       "closed_by": null
     }}
   ],
-  "source_name": "TradeSmith",
-  "email_type": "STOP_LOSS_ALERT"
+    "source_name": "TradeSmith"
 }}
 
 Rules:
@@ -101,7 +100,6 @@ OTHER RULES:
 - closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X; else null
 - ticker: always the underlying stock symbol, not the option symbol
 - source_name: the newsletter or publication name (e.g. "Banyan Hill", "Motley Fool"), NOT the forwarding sender
-- email_type: NEWSLETTER, STOP_LOSS_ALERT, PORTFOLIO_UPDATE, or OTHER
 - ticker must be explicitly present in the email text as a stock symbol (e.g. AAPL, TSLA, NVDA, or NASDAQ:AAPL / NYSE:GEV). Do not infer ticker symbols from company names alone (e.g. Apple, Staples).
 
 Email subject: {subject}
@@ -374,7 +372,6 @@ def _write_recommendations(recommendations_table, open_positions_table, email: d
             "email_date": email_date,
             "email_subject": email["subject"],
             "email_sender": email["sender"],
-            "email_type": extracted.get("email_type", "NEWSLETTER"),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "ttl": ttl,
         }
