@@ -20,6 +20,10 @@ body {
   max-width: 520px;
 }
 
+.container-chat {
+  max-width: 1200px;
+}
+
 .card {
   background: #161b27;
   border: 1px solid #1e2a3a;
@@ -27,6 +31,10 @@ body {
   padding: 2rem;
   box-shadow: 0 4px 32px rgba(0, 0, 0, 0.4);
   text-align: center;
+}
+
+.card-chat {
+  text-align: left;
 }
 
 .logo {
@@ -327,7 +335,8 @@ h1 {
 }
 
 .chat-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.84rem;
 }
@@ -337,6 +346,7 @@ h1 {
   text-align: left;
   padding: 0.55rem 0.6rem;
   border-bottom: 1px solid #1e2a3a;
+  vertical-align: top;
 }
 
 .chat-table th {
@@ -347,4 +357,31 @@ h1 {
 
 .chat-table td {
   color: #d6deea;
+}
+
+.chat-table th:nth-child(1),
+.chat-table td:nth-child(1),
+.chat-table th:nth-child(2),
+.chat-table td:nth-child(2),
+.chat-table th:nth-child(3),
+.chat-table td:nth-child(3),
+.chat-table th:nth-child(4),
+.chat-table td:nth-child(4),
+.chat-table th:nth-child(5),
+.chat-table td:nth-child(5),
+.chat-table th:nth-child(6),
+.chat-table td:nth-child(6),
+.chat-table th:nth-child(7),
+.chat-table td:nth-child(7) {
+  white-space: nowrap;
+}
+
+.chat-table th:nth-child(8),
+.chat-table td:nth-child(8),
+.chat-table th:nth-child(9),
+.chat-table td:nth-child(9) {
+  white-space: normal;
+  min-width: 280px;
+  max-width: 420px;
+  word-break: break-word;
 }

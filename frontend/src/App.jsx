@@ -201,8 +201,8 @@ export default function App() {
   }
 
   return (
-    <div className="container">
-      <div className="card">
+    <div className={`container ${view === 'chat' ? 'container-chat' : ''}`}>
+      <div className={`card ${view === 'chat' ? 'card-chat' : ''}`}>
         <img src="/Inbox-Ag.png" alt="Inbox Aggregator" className="logo" />
         <h1>Inbox Aggregator</h1>
         <p className="tagline">Stock alert notifications and query chat</p>
