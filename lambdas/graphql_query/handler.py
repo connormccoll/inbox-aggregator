@@ -29,6 +29,53 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 
+TICKER_STOPWORDS = {
+    "A",
+    "ALSO",
+    "AND",
+    "ARE",
+    "ASK",
+    "BUY",
+    "CAN",
+    "CLOSE",
+    "CLOSED",
+    "DID",
+    "DO",
+    "EVENT",
+    "EVENTS",
+    "FOR",
+    "FROM",
+    "GET",
+    "GIVE",
+    "HOW",
+    "IN",
+    "INFORMATION",
+    "IS",
+    "IT",
+    "LOSS",
+    "ME",
+    "MORE",
+    "OF",
+    "ON",
+    "OPEN",
+    "OR",
+    "QUESTION",
+    "RECOMMENDATION",
+    "RECOMMENDATIONS",
+    "RESULT",
+    "RETURN",
+    "SELL",
+    "SHOW",
+    "STOP",
+    "THE",
+    "TO",
+    "WHAT",
+    "WHEN",
+    "WHICH",
+    "WITH",
+    "YOU",
+}
+
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -61,18 +108,46 @@ def _extract_ticker(text: str) -> str | None:
     if not text:
         return None
 
-    # Explicit symbol pattern first.
-    m = re.search(r"\b(?:NASDAQ|NYSE)?\s*:?[\s-]*([A-Z]{1,5})\b", text.upper())
-    if m:
-        candidate = m.group(1)
-        if candidate not in {"BUY", "SELL", "CLOSE", "OPEN", "STOP", "LOSS", "WITH", "FROM", "WHEN", "WHAT"}:
+    candidates = []
+
+    # Prefer explicit symbol mentions like $MSTR, NASDAQ:MSTR, NYSE:GEV.
+    for m in re.finditer(r"\$([A-Z]{1,5})\b", text.upper()):
+        candidates.append(m.group(1))
+    for m in re.finditer(r"\b(?:NASDAQ|NYSE)\s*:?\s*([A-Z]{1,5})\b", text.upper()):
+        candidates.append(m.group(1))
+
+    # Then scan generic tokens but require DB evidence.
+    for token in re.findall(r"\b[A-Z]{1,5}\b", text.upper()):
+        if token in TICKER_STOPWORDS:
+            continue
+        candidates.append(token)
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if _ticker_exists(candidate):
             return candidate
 
-    # Fallback: all-caps token in user prompt.
-    for token in re.findall(r"\b[A-Z]{1,5}\b", text.upper()):
-        if token not in {"BUY", "SELL", "CLOSE", "OPEN", "STOP", "LOSS", "WITH", "FROM", "WHEN", "WHAT"}:
-            return token
     return None
+
+
+def _ticker_exists(ticker: str) -> bool:
+    rec_table = dynamodb.Table(RECOMMENDATIONS_TABLE)
+    rec_resp = rec_table.query(
+        KeyConditionExpression=Key("PK").eq(f"TICKER#{ticker}"),
+        Limit=1,
+    )
+    if rec_resp.get("Items"):
+        return True
+
+    open_table = dynamodb.Table(OPEN_POSITIONS_TABLE)
+    open_resp = open_table.query(
+        KeyConditionExpression=Key("PK").eq(f"TICKER#{ticker}"),
+        Limit=1,
+    )
+    return bool(open_resp.get("Items"))
 
 
 def _extract_source(text: str) -> str | None:
@@ -111,6 +186,35 @@ def _query_close_events(ticker: str, source_filter: str | None = None) -> list[d
     return rows
 
 
+def _format_recommendation_row(item: dict) -> dict:
+    return {
+        "ticker": item.get("ticker"),
+        "action": item.get("action"),
+        "source": item.get("source"),
+        "email_date": item.get("email_date"),
+        "confidence": item.get("confidence"),
+        "sentiment": item.get("sentiment"),
+        "price_target": item.get("price_target"),
+        "stop_loss_price": item.get("stop_loss_price"),
+        "instrument_type": item.get("instrument_type"),
+        "option_symbol": item.get("option_symbol"),
+    }
+
+
+def _format_close_row(item: dict) -> dict:
+    return {
+        "ticker": item.get("ticker"),
+        "source": item.get("source"),
+        "close_action": item.get("close_action") or item.get("action"),
+        "close_date": item.get("close_date"),
+        "first_rec_date": item.get("first_rec_date"),
+        "latest_rec_date": item.get("latest_rec_date"),
+        "confidence": item.get("confidence"),
+        "open_status": item.get("open_status"),
+        "rec_count": item.get("rec_count"),
+    }
+
+
 def _run_chat_query(prompt: str) -> dict:
     ticker = _extract_ticker(prompt)
     if not ticker:
@@ -125,12 +229,20 @@ def _run_chat_query(prompt: str) -> dict:
     is_close = any(word in lower for word in ["close", "closed", "stop_loss", "stop loss", "exit", "sold"]) 
 
     if is_close:
-        rows = _query_close_events(ticker, source)
+        raw_rows = _query_close_events(ticker, source)
+        rows = [_format_close_row(r) for r in raw_rows]
         summary = f"Found {len(rows)} close event(s) for {ticker}."
+        if rows:
+            latest = rows[0]
+            summary += f" Latest close: {latest.get('close_date', '?')} by {latest.get('source', '?')} ({latest.get('close_action', '?')})."
         return {"summary": summary, "rows": rows, "intent": "closeEvents"}
 
-    rows = _query_recommendations(ticker, limit=25)
+    raw_rows = _query_recommendations(ticker, limit=25)
+    rows = [_format_recommendation_row(r) for r in raw_rows]
     summary = f"Found {len(rows)} recommendation(s) for {ticker}."
+    if rows:
+        latest = rows[0]
+        summary += f" Latest: {latest.get('action', '?')} on {latest.get('email_date', '?')} by {latest.get('source', '?')}."
     return {"summary": summary, "rows": rows, "intent": "recommendations"}
 
 

@@ -123,10 +123,12 @@ export default function App() {
     }
   }
 
-  function renderChatRows(rows) {
+  function renderChatRows(rows, intent) {
     if (!rows || rows.length === 0) {
       return <p className="chat-empty">No matching rows found.</p>
     }
+
+    const isCloseEvents = intent === 'closeEvents'
 
     return (
       <div className="chat-table-wrap">
@@ -134,18 +136,54 @@ export default function App() {
           <thead>
             <tr>
               <th>Ticker</th>
-              <th>Action</th>
               <th>Source</th>
-              <th>Date</th>
+              {isCloseEvents ? (
+                <>
+                  <th>Close Action</th>
+                  <th>Close Date</th>
+                  <th>First Rec</th>
+                  <th>Latest Rec</th>
+                  <th>Confidence</th>
+                  <th>Rec Count</th>
+                </>
+              ) : (
+                <>
+                  <th>Action</th>
+                  <th>Date</th>
+                  <th>Confidence</th>
+                  <th>Target</th>
+                  <th>Stop</th>
+                  <th>Instrument</th>
+                  <th>Option</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
             {rows.map((row, idx) => (
               <tr key={`${row.PK || row.ticker || 'row'}-${idx}`}>
                 <td>{row.ticker || String(row.PK || '').replace('TICKER#', '') || '-'}</td>
-                <td>{row.action || row.close_action || '-'}</td>
                 <td>{row.source || '-'}</td>
-                <td>{row.email_date || row.close_date || row.latest_rec_date || '-'}</td>
+                {isCloseEvents ? (
+                  <>
+                    <td>{row.close_action || row.action || '-'}</td>
+                    <td>{row.close_date || '-'}</td>
+                    <td>{row.first_rec_date || '-'}</td>
+                    <td>{row.latest_rec_date || '-'}</td>
+                    <td>{row.confidence || '-'}</td>
+                    <td>{row.rec_count ?? '-'}</td>
+                  </>
+                ) : (
+                  <>
+                    <td>{row.action || '-'}</td>
+                    <td>{row.email_date || '-'}</td>
+                    <td>{row.confidence || '-'}</td>
+                    <td>{row.price_target || '-'}</td>
+                    <td>{row.stop_loss_price || '-'}</td>
+                    <td>{row.instrument_type || '-'}</td>
+                    <td>{row.option_symbol || '-'}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -378,7 +416,7 @@ export default function App() {
               <div className="chat-result">
                 <h3>Result</h3>
                 <p className="chat-summary">{chatResult.summary || 'Query completed.'}</p>
-                {renderChatRows(chatResult.rows || [])}
+                {renderChatRows(chatResult.rows || [], chatResult.intent)}
               </div>
             )}
           </div>
