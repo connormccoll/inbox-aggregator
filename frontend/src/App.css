@@ -385,3 +385,82 @@ h1 {
   max-width: 420px;
   word-break: break-word;
 }
+
+/* ── auth + account ───────────────────────────────────────────── */
+.auth-landing { text-align: center; }
+.btn-link {
+  background: none;
+  border: none;
+  color: #93c5fd;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.4rem;
+  margin-top: 0.5rem;
+}
+.btn-link:hover { text-decoration: underline; }
+.btn-link.danger { color: #f87171; }
+.account-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.25rem 0 1rem;
+  font-size: 0.85rem;
+}
+.account-email { color: #94a3b8; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── channels ─────────────────────────────────────────────────── */
+.channel-list { list-style: none; padding: 0; margin: 0 0 0.5rem; }
+.channel-row {
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.channel-main { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.channel-type {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  border: 1px solid #1e2a3a;
+  border-radius: 5px;
+  padding: 0.1rem 0.4rem;
+}
+.channel-value { font-family: ui-monospace, monospace; word-break: break-all; flex: 1; }
+.badge {
+  font-size: 0.72rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.badge-active { background: #064e3b; color: #6ee7b7; }
+.badge-pending { background: #422006; color: #fbbf24; }
+.channel-verify { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+.channel-verify input { flex: 1; }
+.btn-small {
+  padding: 0.45rem 0.9rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-small:disabled { opacity: 0.6; cursor: default; }
+.add-channel select {
+  width: 100%;
+  padding: 0.6rem;
+  background: #0d0f14;
+  color: #e2e8f0;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+}
+.notice {
+  background: #0c2a4d;
+  border: 1px solid #1d4ed8;
+  color: #bfdbfe;
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.6rem;
+}

@@ -93,6 +93,9 @@ jobs:
           echo "api_url=$(terraform output -raw api_gateway_url)" >> "$GITHUB_OUTPUT"
           echo "frontend_bucket=$(terraform output -raw frontend_bucket_name 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
           echo "cf_distribution_id=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+          echo "cognito_domain=$(terraform output -raw cognito_hosted_ui_domain 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+          echo "cognito_client_id=$(terraform output -raw cognito_client_id 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+          echo "frontend_url=$(terraform output -raw frontend_url 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
 
@@ -111,6 +114,9 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: ${{ steps.tf_outputs.outputs.api_url }}
+          VITE_COGNITO_DOMAIN: ${{ steps.tf_outputs.outputs.cognito_domain }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.tf_outputs.outputs.cognito_client_id }}
+          VITE_REDIRECT_URI: ${{ steps.tf_outputs.outputs.frontend_url }}
         run: npm run build
 
       - name: Sync frontend to S3
