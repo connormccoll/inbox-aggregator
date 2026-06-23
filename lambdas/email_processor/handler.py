@@ -16,7 +16,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 
 import boto3
 from botocore.exceptions import ClientError
@@ -235,8 +235,8 @@ def _update_open_positions(
 ) -> None:
     """
     Maintain the OpenPositions table:
-    - BUY/POSITIVE → upsert as OPEN (increment rec_count, keep first_rec_date unchanged).
-    - SELL/STOP_LOSS/NEGATIVE → upsert as CLOSED with 7-day TTL.
+    - BUY/POSITIVE -> upsert as OPEN (increment rec_count, keep first_rec_date unchanged).
+    - SELL/STOP_LOSS/NEGATIVE -> upsert as CLOSED with 7-day TTL.
     """
     pk = f"TICKER#{ticker}"
     sk = f"SOURCE#{source}"
@@ -325,6 +325,23 @@ def _update_open_positions(
                 ticker, source, action, "OPEN" if action in OPEN_ACTIONS else "CLOSED")
 
 
+def _resolve_email_date(date_header: str) -> str:
+    """
+    Return the YYYY-MM-DD (UTC) the email was actually sent, parsed from the
+    RFC 2822 Date header. Falls back to the current UTC date if the header is
+    missing or unparseable.
+    """
+    if date_header:
+        try:
+            dt = parsedate_to_datetime(date_header)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            logger.warning("Unparseable Date header %r — using current date.", date_header)
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 def _has_ticker_evidence(ticker: str, email: dict) -> bool:
     """Require explicit ticker-symbol evidence in subject/body to reduce false positives."""
     subject = email.get("subject", "")
@@ -334,7 +351,7 @@ def _has_ticker_evidence(ticker: str, email: dict) -> bool:
 
 
 def _write_recommendations(recommendations_table, open_positions_table, email: dict, extracted: dict) -> None:
-    email_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    email_date = _resolve_email_date(email.get("date", ""))
     message_id = email["message_id"]
     source_name = extracted.get("source_name", "Unknown")
     ttl = int(time.time()) + (RECOMMENDATIONS_TTL_DAYS * 86400)

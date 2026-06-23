@@ -5,20 +5,20 @@ EventBridge-triggered Lambda. Runs weekly (default: Sundays 7 PM UTC).
 Scans the OpenPositions table to build a comprehensive weekly summary:
   - All currently OPEN recommendations grouped by ticker, showing every
     source with confidence level and first recommendation date.
-  - Recently CLOSED positions (within last 7 days) flagged as "CLOSE ALERT"
-    to remind subscribers that a source exited or stopped out. CLOSED rows
-    auto-purge via DynamoDB TTL after 7 days.
+  - Recently CLOSED positions (within last 7 days) flagged as "CLOSE ALERT".
+
+Sends to every active delivery channel (Users table ActiveChannels GSI). The
+long digest is chunked for SMS; Pushover receives it whole.
 """
 
 import logging
 import os
-import urllib.parse
-import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Key
+
+import notify
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -28,7 +28,7 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 sns = boto3.client("sns", region_name=region)
 
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
-SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+USERS_TABLE = os.environ["USERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
@@ -42,20 +42,10 @@ def _scan_open_positions() -> list[dict]:
     items = []
     resp = table.scan()
     items.extend(resp.get("Items", []))
-    # Handle pagination
     while "LastEvaluatedKey" in resp:
         resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
         items.extend(resp.get("Items", []))
     return items
-
-
-def _get_active_subscribers() -> list[dict]:
-    table = dynamodb.Table(SUBSCRIBERS_TABLE)
-    resp = table.query(
-        IndexName="StatusIndex",
-        KeyConditionExpression=Key("status").eq("ACTIVE"),
-    )
-    return resp.get("Items", [])
 
 
 def _build_weekly_digest(positions: list[dict], week_str: str) -> str:
@@ -153,36 +143,6 @@ def _chunk_message(message: str, chunk_size: int = SMS_CHUNK_SIZE) -> list[str]:
     return chunks
 
 
-def _send_sms(phone_number: str, message: str) -> None:
-    kwargs = dict(
-        PhoneNumber=phone_number,
-        Message=message,
-        MessageAttributes={
-            "AWS.SNS.SMS.SMSType": {
-                "DataType": "String",
-                "StringValue": "Transactional",
-            }
-        },
-    )
-    if ORIGINATION_NUMBER:
-        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
-            "DataType": "String",
-            "StringValue": ORIGINATION_NUMBER,
-        }
-    sns.publish(**kwargs)
-
-
-def _send_pushover(user_key: str, title: str, message: str) -> None:
-    data = urllib.parse.urlencode({
-        "token": PUSHOVER_API_TOKEN,
-        "user": user_key,
-        "title": title,
-        "message": message[:1024],
-    }).encode()
-    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
-    urllib.request.urlopen(req, timeout=10)
-
-
 def lambda_handler(event: dict, context) -> None:
     week_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logger.info("Running weekly digest for week of %s", week_str)
@@ -190,28 +150,26 @@ def lambda_handler(event: dict, context) -> None:
     positions = _scan_open_positions()
     logger.info("Found %d open-position rows", len(positions))
 
-    subscribers = _get_active_subscribers()
-    if not subscribers:
-        logger.info("No active subscribers — weekly digest not sent.")
+    channels = notify.get_active_channels(dynamodb.Table(USERS_TABLE))
+    if not channels:
+        logger.info("No active channels — weekly digest not sent.")
         return
 
     digest = _build_weekly_digest(positions, week_str)
     chunks = _chunk_message(digest)
+    title = f"[INBOX] Weekly Summary — {week_str}"
     logger.info("Weekly digest: %d chunks, %d chars total", len(chunks), len(digest))
 
-    for subscriber in subscribers:
-        phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-        pushover_user_key = subscriber.get("pushover_user_key", "")
-        if phone.startswith("+"):
-            try:
+    for ch in channels:
+        ctype = ch.get("channel_type", "")
+        value = ch.get("value", "")
+        if not value:
+            continue
+        try:
+            if ctype == "SMS":
                 for chunk in chunks:
-                    _send_sms(phone, chunk)
-                logger.info("Weekly digest sent to %s (%d chunks)", phone, len(chunks))
-            except Exception as exc:
-                logger.error("Failed to send weekly digest to %s: %s", phone, exc)
-        if pushover_user_key and PUSHOVER_API_TOKEN:
-            try:
-                _send_pushover(pushover_user_key, f"[INBOX] Weekly Summary — {week_str}", digest)
-                logger.info("Weekly digest Pushover sent to %s", pushover_user_key)
-            except Exception as exc:
-                logger.error("Failed to send weekly Pushover to %s: %s", pushover_user_key, exc)
+                    notify.send_sms(sns, value, chunk, ORIGINATION_NUMBER)
+            elif ctype == "PUSHOVER" and PUSHOVER_API_TOKEN:
+                notify.send_pushover(PUSHOVER_API_TOKEN, value, title, digest)
+        except Exception as exc:
+            logger.error("Weekly delivery failed type=%s value=%s: %s", ctype, value, exc)

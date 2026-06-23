@@ -83,21 +83,30 @@ def lambda_handler(event: dict, context) -> dict:
     if stored_history_id:
         try:
             service = build_gmail_service()
-            history_response = (
-                service.users()
-                .history()
-                .list(
-                    userId="me",
-                    startHistoryId=stored_history_id,
-                    historyTypes=["messageAdded"],
+            page_token = None
+            # Gmail paginates history; loop over all pages so high-volume
+            # bursts don't silently drop messages beyond the first page.
+            while True:
+                history_response = (
+                    service.users()
+                    .history()
+                    .list(
+                        userId="me",
+                        startHistoryId=stored_history_id,
+                        historyTypes=["messageAdded"],
+                        pageToken=page_token,
+                    )
+                    .execute()
                 )
-                .execute()
-            )
 
-            for history_record in history_response.get("history", []):
-                for added in history_record.get("messagesAdded", []):
-                    msg_id = added["message"]["id"]
-                    message_ids.append(msg_id)
+                for history_record in history_response.get("history", []):
+                    for added in history_record.get("messagesAdded", []):
+                        msg_id = added["message"]["id"]
+                        message_ids.append(msg_id)
+
+                page_token = history_response.get("nextPageToken")
+                if not page_token:
+                    break
 
         except Exception as exc:
             logger.error("Gmail history.list failed: %s", exc)
@@ -112,18 +121,4 @@ def lambda_handler(event: dict, context) -> dict:
     # on a Lambda retry
     _store_history_id(new_history_id)
 
-    # Enqueue unique message IDs to SQS
-    for msg_id in message_ids:
-        sqs.send_message(
-            QueueUrl=SQS_QUEUE_URL,
-            MessageBody=json.dumps({"message_id": msg_id}),
-        )
-        logger.info("Enqueued message_id=%s", msg_id)
-
-    logger.info(
-        "Processed notification historyId=%s; enqueued %d message(s)",
-        new_history_id,
-        len(message_ids),
-    )
-
-    return {"statusCode": 200, "body": "OK"}
+    # Enqueue unique m

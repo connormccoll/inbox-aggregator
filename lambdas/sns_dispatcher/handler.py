@@ -2,16 +2,19 @@
 sns_dispatcher/handler.py
 
 DynamoDB Streams consumer. Fires on INSERT events from the Recommendations table.
-Sends immediate alerts to active subscribers based on action and urgency rules.
+Sends immediate alerts to every active delivery channel (SMS + Pushover) based on
+action and urgency rules.
+
+Delivery targets come from the Users table ActiveChannels GSI — one row per
+verified, opted-in channel across all users.
 """
 
 import logging
 import os
-import urllib.parse
-import urllib.request
 
 import boto3
-from boto3.dynamodb.conditions import Key
+
+import notify
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -20,21 +23,12 @@ region = os.environ["AWS_REGION_NAME"]
 dynamodb = boto3.resource("dynamodb", region_name=region)
 sns = boto3.client("sns", region_name=region)
 
-SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+USERS_TABLE = os.environ["USERS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
 CLOSE_ACTIONS = {"SELL", "STOP_LOSS", "NEGATIVE", "CLOSE"}
-
-
-def _get_active_subscribers() -> list[dict]:
-    table = dynamodb.Table(SUBSCRIBERS_TABLE)
-    resp = table.query(
-        IndexName="StatusIndex",
-        KeyConditionExpression=Key("status").eq("ACTIVE"),
-    )
-    return resp.get("Items", [])
 
 
 def _get_open_position(ticker: str, source: str) -> dict | None:
@@ -93,36 +87,6 @@ def _format_sms(rec: dict, open_position: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-def _send_sms(phone_number: str, message: str) -> None:
-    kwargs = dict(
-        PhoneNumber=phone_number,
-        Message=message,
-        MessageAttributes={
-            "AWS.SNS.SMS.SMSType": {
-                "DataType": "String",
-                "StringValue": "Transactional",
-            }
-        },
-    )
-    if ORIGINATION_NUMBER:
-        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
-            "DataType": "String",
-            "StringValue": ORIGINATION_NUMBER,
-        }
-    sns.publish(**kwargs)
-
-
-def _send_pushover(user_key: str, title: str, message: str) -> None:
-    data = urllib.parse.urlencode({
-        "token": PUSHOVER_API_TOKEN,
-        "user": user_key,
-        "title": title,
-        "message": message,
-    }).encode()
-    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
-    urllib.request.urlopen(req, timeout=10)
-
-
 def _unmarshal_rec(new_image: dict) -> dict:
     """Convert DynamoDB stream NewImage format to plain dict."""
     deserializer = boto3.dynamodb.types.TypeDeserializer()
@@ -130,9 +94,9 @@ def _unmarshal_rec(new_image: dict) -> dict:
 
 
 def lambda_handler(event: dict, context) -> None:
-    subscribers = _get_active_subscribers()
-    if not subscribers:
-        logger.info("No active subscribers — skipping dispatch.")
+    channels = notify.get_active_channels(dynamodb.Table(USERS_TABLE))
+    if not channels:
+        logger.info("No active channels — skipping dispatch.")
         return
 
     for record in event.get("Records", []):
@@ -171,20 +135,14 @@ def lambda_handler(event: dict, context) -> None:
             open_position = _get_open_position(ticker, rec.get("source", ""))
 
         message = _format_sms(rec, open_position)
-        logger.info("Sending immediate alert for ticker=%s to %d subscribers", ticker, len(subscribers))
+        logger.info("Dispatching alert for ticker=%s to %d channel(s)", ticker, len(channels))
 
-        for subscriber in subscribers:
-            phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-            pushover_user_key = subscriber.get("pushover_user_key", "")
-            if phone.startswith("+"):
-                try:
-                    _send_sms(phone, message[:320])
-                    logger.info("SMS sent to %s for ticker=%s", phone, ticker)
-                except Exception as exc:
-                    logger.error("Failed to send SMS to %s: %s", phone, exc)
-            if pushover_user_key and PUSHOVER_API_TOKEN:
-                try:
-                    _send_pushover(pushover_user_key, f"[INBOX] {ticker} {rec.get('action', '')}", message)
-                    logger.info("Pushover sent to %s for ticker=%s", pushover_user_key, ticker)
-                except Exception as exc:
-                    logger.error("Failed to send Pushover to %s: %s", pushover_user_key, exc)
+        notify.dispatch(
+            channels,
+            sns,
+            sms_message=message[:320],
+            pushover_title=f"[INBOX] {ticker} {rec.get('action', '')}",
+            pushover_message=message,
+            origination_number=ORIGINATION_NUMBER,
+            pushover_token=PUSHOVER_API_TOKEN,
+        )

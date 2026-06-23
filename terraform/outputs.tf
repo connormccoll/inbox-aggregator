@@ -9,8 +9,33 @@ output "gmail_push_endpoint" {
 }
 
 output "graphql_endpoint" {
-  description = "GraphQL-style endpoint for chat and table queries."
+  description = "GraphQL-style endpoint for chat and table queries (Cognito-authorized)."
   value       = "${module.api_gateway.base_url}/graphql"
+}
+
+output "redeem_endpoint" {
+  description = "Invitation-redemption endpoint (Cognito-authorized)."
+  value       = "${module.api_gateway.base_url}/redeem"
+}
+
+output "channels_endpoint" {
+  description = "Delivery-channel management endpoint (Cognito-authorized)."
+  value       = "${module.api_gateway.base_url}/channels"
+}
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID."
+  value       = module.cognito.user_pool_id
+}
+
+output "cognito_client_id" {
+  description = "Cognito SPA app client ID (used by the frontend)."
+  value       = module.cognito.user_pool_client_id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Cognito Hosted UI base URL for Google sign-in."
+  value       = module.cognito.hosted_ui_domain
 }
 
 output "email_processing_queue_url" {
@@ -18,27 +43,4 @@ output "email_processing_queue_url" {
   value       = module.sqs.queue_url
 }
 
-output "recommendations_table_name" {
-  description = "DynamoDB Recommendations table name."
-  value       = module.dynamodb.recommendations_table_name
-}
-
-output "subscribers_table_name" {
-  description = "DynamoDB Subscribers table name."
-  value       = module.dynamodb.subscribers_table_name
-}
-
-output "frontend_url" {
-  description = "CloudFront HTTPS URL for the subscription portal."
-  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
-}
-
-output "frontend_bucket_name" {
-  description = "S3 bucket name for the frontend static assets."
-  value       = aws_s3_bucket.frontend.id
-}
-
-output "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID (used for cache invalidations)."
-  value       = aws_cloudfront_distribution.frontend.id
-}
+output "recommenda

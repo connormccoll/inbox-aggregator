@@ -91,13 +91,14 @@ data "aws_iam_policy_document" "dynamodb_readwrite" {
       "dynamodb:UpdateItem",
       "dynamodb:DeleteItem",
       "dynamodb:Query",
+      "dynamodb:Scan",
       "dynamodb:BatchWriteItem",
     ]
     resources = [
       module.dynamodb.recommendations_table_arn,
       "${module.dynamodb.recommendations_table_arn}/index/*",
-      module.dynamodb.subscribers_table_arn,
-      "${module.dynamodb.subscribers_table_arn}/index/*",
+      module.dynamodb.users_table_arn,
+      "${module.dynamodb.users_table_arn}/index/*",
       module.dynamodb.processed_emails_table_arn,
       module.dynamodb.open_positions_table_arn,
       "${module.dynamodb.open_positions_table_arn}/index/*",
@@ -138,13 +139,13 @@ data "aws_iam_policy_document" "sns_publish" {
   }
 }
 
-# Policy for subscribe Lambda — write-only to Subscribers table
-data "aws_iam_policy_document" "subscribe_dynamodb_write" {
+# Policy for redeem Lambda — add an authenticated user to the Cognito "active" group
+data "aws_iam_policy_document" "cognito_add_group" {
   statement {
-    sid       = "SubscribersWrite"
+    sid       = "CognitoAddToGroup"
     effect    = "Allow"
-    actions   = ["dynamodb:PutItem"]
-    resources = [module.dynamodb.subscribers_table_arn]
+    actions   = ["cognito-idp:AdminAddUserToGroup"]
+    resources = [module.cognito.user_pool_arn]
   }
 }
 
@@ -251,7 +252,7 @@ module "lambda_sns_dispatcher" {
   layer_arns    = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
-    SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
+    USERS_TABLE           = module.dynamodb.users_table_name
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
@@ -308,7 +309,7 @@ module "lambda_daily_digest" {
 
   environment_variables = {
     RECOMMENDATIONS_TABLE = module.dynamodb.recommendations_table_name
-    SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
+    USERS_TABLE           = module.dynamodb.users_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
     PUSHOVER_API_TOKEN    = var.pushover_api_token
@@ -333,7 +334,7 @@ module "lambda_weekly_digest" {
 
   environment_variables = {
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
-    SUBSCRIBERS_TABLE     = module.dynamodb.subscribers_table_name
+    USERS_TABLE           = module.dynamodb.users_table_name
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
     PUSHOVER_API_TOKEN    = var.pushover_api_token
@@ -368,26 +369,70 @@ module "lambda_gmail_watch_refresh" {
 }
 
 # ──────────────────────────────────────────────
-# Lambda: subscribe
-# API Gateway POST /subscribe; registers a new subscriber in DynamoDB
+# Cognito: user pool + Google IdP + Hosted UI
+# Sign-in is delegated to Google; the invitation password gates activation.
 # ──────────────────────────────────────────────
-module "lambda_subscribe" {
+module "cognito" {
+  source               = "./modules/cognito"
+  domain_prefix        = "${var.cognito_domain_prefix}-${local.account_id}"
+  google_client_id     = var.google_client_id
+  google_client_secret = var.google_client_secret
+  callback_urls = [
+    "https://${aws_cloudfront_distribution.frontend.domain_name}",
+    "https://${aws_cloudfront_distribution.frontend.domain_name}/",
+  ]
+  logout_urls = [
+    "https://${aws_cloudfront_distribution.frontend.domain_name}",
+    "https://${aws_cloudfront_distribution.frontend.domain_name}/",
+  ]
+}
+
+# ──────────────────────────────────────────────
+# Lambda: redeem-invitation
+# API Gateway POST /redeem (Cognito-authorized); validates the invitation
+# password and adds the caller to the Cognito "active" group + creates profile.
+# ──────────────────────────────────────────────
+module "lambda_redeem" {
   source        = "./modules/lambda"
-  function_name = "${local.prefix}-subscribe"
-  source_dir    = "${path.module}/../lambdas/subscribe"
+  function_name = "${local.prefix}-redeem"
+  source_dir    = "${path.module}/../lambdas/redeem"
   timeout       = 10
 
   environment_variables = {
-    SUBSCRIBERS_TABLE   = module.dynamodb.subscribers_table_name
-    AWS_REGION_NAME     = var.aws_region
+    USERS_TABLE         = module.dynamodb.users_table_name
+    USER_POOL_ID        = module.cognito.user_pool_id
     INVITATION_PASSWORD = var.invitation_password
-    ORIGINATION_NUMBER  = var.origination_number
-    PUSHOVER_API_TOKEN  = var.pushover_api_token
+    ACTIVE_GROUP        = "active"
+    AWS_REGION_NAME     = var.aws_region
   }
 
   inline_policies = {
-    subscribers-write = data.aws_iam_policy_document.subscribe_dynamodb_write.json
-    sns-publish       = data.aws_iam_policy_document.sns_publish.json
+    dynamodb-readwrite = data.aws_iam_policy_document.dynamodb_readwrite.json
+    cognito-add-group  = data.aws_iam_policy_document.cognito_add_group.json
+  }
+}
+
+# ──────────────────────────────────────────────
+# Lambda: channels
+# API Gateway /channels (Cognito-authorized); CRUD + verification for a user's
+# SMS / Pushover delivery channels.
+# ──────────────────────────────────────────────
+module "lambda_channels" {
+  source        = "./modules/lambda"
+  function_name = "${local.prefix}-channels"
+  source_dir    = "${path.module}/../lambdas/channels"
+  timeout       = 10
+
+  environment_variables = {
+    USERS_TABLE        = module.dynamodb.users_table_name
+    AWS_REGION_NAME    = var.aws_region
+    ORIGINATION_NUMBER = var.origination_number
+    PUSHOVER_API_TOKEN = var.pushover_api_token
+  }
+
+  inline_policies = {
+    dynamodb-readwrite = data.aws_iam_policy_document.dynamodb_readwrite.json
+    sns-publish        = data.aws_iam_policy_document.sns_publish.json
   }
 }
 
@@ -419,10 +464,13 @@ module "api_gateway" {
   source                          = "./modules/api_gateway"
   gmail_webhook_lambda_arn        = module.lambda_gmail_webhook.function_arn
   gmail_webhook_lambda_invoke_arn = module.lambda_gmail_webhook.invoke_arn
-  subscribe_lambda_arn            = module.lambda_subscribe.function_arn
-  subscribe_lambda_invoke_arn     = module.lambda_subscribe.invoke_arn
   graphql_lambda_arn              = module.lambda_graphql_query.function_arn
   graphql_lambda_invoke_arn       = module.lambda_graphql_query.invoke_arn
+  redeem_lambda_arn               = module.lambda_redeem.function_arn
+  redeem_lambda_invoke_arn        = module.lambda_redeem.invoke_arn
+  channels_lambda_arn             = module.lambda_channels.function_arn
+  channels_lambda_invoke_arn      = module.lambda_channels.invoke_arn
+  cognito_user_pool_arn           = module.cognito.user_pool_arn
   environment                     = var.environment
 }
 
@@ -491,88 +539,4 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 }
 
 # Origin Access Control — lets CloudFront fetch from the private bucket
-resource "aws_cloudfront_origin_access_control" "frontend" {
-  name                              = "${local.prefix}-frontend-oac"
-  origin_access_control_origin_type = "s3"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
-resource "aws_cloudfront_distribution" "frontend" {
-  enabled             = true
-  default_root_object = "index.html"
-  price_class         = "PriceClass_100" # US/Europe only — cheapest
-
-  origin {
-    domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
-    origin_id                = "s3-frontend"
-    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
-  }
-
-  default_cache_behavior {
-    target_origin_id       = "s3-frontend"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
-
-    min_ttl     = 0
-    default_ttl = 86400
-    max_ttl     = 31536000
-  }
-
-  # Return index.html for all 404s so React handles routing
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-
-  restrictions {
-    geo_restriction { restriction_type = "none" }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-  }
-
-  tags = {
-    Name = "${local.prefix}-frontend"
-  }
-}
-
-# Allow CloudFront OAC to read from the private bucket
-resource "aws_s3_bucket_policy" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "AllowCloudFrontOAC"
-      Effect = "Allow"
-      Principal = {
-        Service = "cloudfront.amazonaws.com"
-      }
-      Action   = "s3:GetObject"
-      Resource = "${aws_s3_bucket.frontend.arn}/*"
-      Condition = {
-        StringEquals = {
-          "AWS:SourceArn" = aws_cloudfront_distribution.frontend.arn
-        }
-      }
-    }]
-  })
-
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
-}
+resource "aws_cloudfront

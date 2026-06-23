@@ -3,18 +3,17 @@ daily_digest/handler.py
 
 EventBridge-triggered Lambda. Runs weekdays after market close.
 Queries today's Recommendations from DynamoDB DateIndex GSI,
-assembles a plain-text digest, and sends it to all active subscribers.
+assembles a plain-text digest, and sends it to every active delivery channel.
 """
 
-import json
 import logging
 import os
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Key
+
+import notify
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -24,7 +23,7 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 sns = boto3.client("sns", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
-SUBSCRIBERS_TABLE = os.environ["SUBSCRIBERS_TABLE"]
+USERS_TABLE = os.environ["USERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
 
@@ -34,20 +33,17 @@ ACTION_ORDER = ["STOP_LOSS", "SELL", "BUY", "HOLD", "POSITIVE", "NEGATIVE"]
 
 def _get_todays_recommendations(date_str: str) -> list[dict]:
     table = dynamodb.Table(RECOMMENDATIONS_TABLE)
-    resp = table.query(
-        IndexName="DateIndex",
-        KeyConditionExpression=Key("date_pk").eq(f"DATE#{date_str}"),
-    )
-    return resp.get("Items", [])
-
-
-def _get_active_subscribers() -> list[dict]:
-    table = dynamodb.Table(SUBSCRIBERS_TABLE)
-    resp = table.query(
-        IndexName="StatusIndex",
-        KeyConditionExpression=Key("status").eq("ACTIVE"),
-    )
-    return resp.get("Items", [])
+    items: list[dict] = []
+    kwargs = {
+        "IndexName": "DateIndex",
+        "KeyConditionExpression": Key("date_pk").eq(f"DATE#{date_str}"),
+    }
+    resp = table.query(**kwargs)
+    items.extend(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table.query(ExclusiveStartKey=resp["LastEvaluatedKey"], **kwargs)
+        items.extend(resp.get("Items", []))
+    return items
 
 
 def _build_digest(date_str: str, recommendations: list[dict]) -> str:
@@ -78,36 +74,6 @@ def _build_digest(date_str: str, recommendations: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _send_sms(phone_number: str, message: str) -> None:
-    kwargs = dict(
-        PhoneNumber=phone_number,
-        Message=message,
-        MessageAttributes={
-            "AWS.SNS.SMS.SMSType": {
-                "DataType": "String",
-                "StringValue": "Transactional",
-            }
-        },
-    )
-    if ORIGINATION_NUMBER:
-        kwargs["MessageAttributes"]["AWS.MM.SMS.OriginationNumber"] = {
-            "DataType": "String",
-            "StringValue": ORIGINATION_NUMBER,
-        }
-    sns.publish(**kwargs)
-
-
-def _send_pushover(user_key: str, title: str, message: str) -> None:
-    data = urllib.parse.urlencode({
-        "token": PUSHOVER_API_TOKEN,
-        "user": user_key,
-        "title": title,
-        "message": message,
-    }).encode()
-    req = urllib.request.Request("https://api.pushover.net/1/messages.json", data=data)
-    urllib.request.urlopen(req, timeout=10)
-
-
 def lambda_handler(event: dict, context) -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logger.info("Running daily digest for date=%s", today)
@@ -115,26 +81,20 @@ def lambda_handler(event: dict, context) -> None:
     recommendations = _get_todays_recommendations(today)
     logger.info("Found %d recommendations for %s", len(recommendations), today)
 
-    subscribers = _get_active_subscribers()
-    if not subscribers:
-        logger.info("No active subscribers — digest not sent.")
+    channels = notify.get_active_channels(dynamodb.Table(USERS_TABLE))
+    if not channels:
+        logger.info("No active channels — digest not sent.")
         return
 
     digest = _build_digest(today, recommendations)
     logger.info("Digest message:\n%s", digest)
 
-    for subscriber in subscribers:
-        phone = subscriber["PK"].removeprefix("SUBSCRIBER#")
-        pushover_user_key = subscriber.get("pushover_user_key", "")
-        if phone.startswith("+"):
-            try:
-                _send_sms(phone, digest)
-                logger.info("Digest SMS sent to %s", phone)
-            except Exception as exc:
-                logger.error("Failed to send digest to %s: %s", phone, exc)
-        if pushover_user_key and PUSHOVER_API_TOKEN:
-            try:
-                _send_pushover(pushover_user_key, f"[INBOX] Daily Digest {today}", digest)
-                logger.info("Digest Pushover sent to %s", pushover_user_key)
-            except Exception as exc:
-                logger.error("Failed to send Pushover digest to %s: %s", pushover_user_key, exc)
+    notify.dispatch(
+        channels,
+        sns,
+        sms_message=digest,
+        pushover_title=f"[INBOX] Daily Digest {today}",
+        pushover_message=digest,
+        origination_number=ORIGINATION_NUMBER,
+        pushover_token=PUSHOVER_API_TOKEN,
+    )
