@@ -68,6 +68,18 @@ def _sub(event: dict) -> str | None:
     )
 
 
+def _in_active_group(event: dict) -> bool:
+    """True if the caller's Cognito token carries the 'active' group claim."""
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("claims", {})
+    ) or {}
+    raw = claims.get("cognito:groups", "")
+    groups = raw if isinstance(raw, list) else str(raw).strip("[]").replace(",", " ").split()
+    return "active" in groups
+
+
 def _channel_sk(ctype: str, value: str) -> str:
     return f"CHANNEL#{ctype}#{value}"
 
@@ -182,6 +194,8 @@ def lambda_handler(event: dict, context) -> dict:
     sub = _sub(event)
     if not sub:
         return _response(401, {"error": "Unauthenticated"})
+    if not _in_active_group(event):
+        return _response(403, {"error": "Account not activated \u2014 redeem your invitation first."})
 
     table = dynamodb.Table(USERS_TABLE)
 

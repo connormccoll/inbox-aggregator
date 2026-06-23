@@ -278,9 +278,24 @@ def _run_chat_query(prompt: str) -> dict:
     return {"summary": summary, "rows": rows, "intent": "recommendations"}
 
 
+def _in_active_group(event: dict) -> bool:
+    """True if the caller's Cognito token carries the 'active' group claim."""
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("claims", {})
+    ) or {}
+    raw = claims.get("cognito:groups", "")
+    groups = raw if isinstance(raw, list) else str(raw).strip("[]").replace(",", " ").split()
+    return "active" in groups
+
+
 def lambda_handler(event: dict, _context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS_HEADERS, "body": ""}
+
+    if not _in_active_group(event):
+        return _response(403, {"errors": [{"message": "Account not activated"}]})
 
     if event.get("httpMethod") != "POST":
         return _response(405, {"errors": [{"message": "Method not allowed"}]})
