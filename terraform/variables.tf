@@ -57,3 +57,22 @@ variable "invitation_password" {
   default     = "blackfamilytrust"
   sensitive   = true
 }
+
+variable "google_client_id" {
+  description = "Google OAuth 2.0 client ID for Cognito federated sign-in."
+  type        = string
+  default     = ""
+}
+
+variable "google_client_secret" {
+  description = "Google OAuth 2.0 client secret for Cognito federated sign-in."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "cognito_domain_prefix" {
+  description = "Base prefix for the Cognito Hosted UI domain (account id is appended for global uniqueness)."
+  type        = string
+  default     = "inbox-aggregator"
+}

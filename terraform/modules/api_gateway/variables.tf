@@ -33,4 +33,17 @@ variable "channels_lambda_arn" {
   type        = string
 }
 
-va
+variable "channels_lambda_invoke_arn" {
+  description = "Invoke ARN of the channels Lambda function."
+  type        = string
+}
+
+variable "cognito_user_pool_arn" {
+  description = "ARN of the Cognito user pool backing the API authorizer."
+  type        = string
+}
+
+variable "environment" {
+  description = "Deployment environment."
+  type        = string
+}

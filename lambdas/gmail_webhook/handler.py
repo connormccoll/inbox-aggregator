@@ -121,4 +121,18 @@ def lambda_handler(event: dict, context) -> dict:
     # on a Lambda retry
     _store_history_id(new_history_id)
 
-    # Enqueue unique m
+    # Enqueue unique message IDs to SQS
+    for msg_id in message_ids:
+        sqs.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps({"message_id": msg_id}),
+        )
+        logger.info("Enqueued message_id=%s", msg_id)
+
+    logger.info(
+        "Processed notification historyId=%s; enqueued %d message(s)",
+        new_history_id,
+        len(message_ids),
+    )
+
+    return {"statusCode": 200, "body": "OK"}

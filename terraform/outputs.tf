@@ -43,4 +43,27 @@ output "email_processing_queue_url" {
   value       = module.sqs.queue_url
 }
 
-output "recommenda
+output "recommendations_table_name" {
+  description = "DynamoDB Recommendations table name."
+  value       = module.dynamodb.recommendations_table_name
+}
+
+output "users_table_name" {
+  description = "DynamoDB Users table name."
+  value       = module.dynamodb.users_table_name
+}
+
+output "frontend_url" {
+  description = "CloudFront HTTPS URL for the subscription portal."
+  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+}
+
+output "frontend_bucket_name" {
+  description = "S3 bucket name for the frontend static assets."
+  value       = aws_s3_bucket.frontend.id
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (used for cache invalidations)."
+  value       = aws_cloudfront_distribution.frontend.id
+}
