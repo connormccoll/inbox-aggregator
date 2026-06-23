@@ -38,6 +38,11 @@ output "cognito_hosted_ui_domain" {
   value       = module.cognito.hosted_ui_domain
 }
 
+output "cognito_redirect_uri" {
+  description = "Authorized redirect URI to register in the Google OAuth client."
+  value       = "${module.cognito.hosted_ui_domain}/oauth2/idpresponse"
+}
+
 output "email_processing_queue_url" {
   description = "SQS queue URL for email processing."
   value       = module.sqs.queue_url
