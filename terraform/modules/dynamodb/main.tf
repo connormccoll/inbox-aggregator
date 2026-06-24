@@ -164,6 +164,30 @@ resource "aws_dynamodb_table" "feedback" {
 }
 
 # ──────────────────────────────────────────────
+# Prompts table — versioned extraction prompt (human-approved).
+# PK: PROMPT#extraction  SK: CURRENT | PENDING | V#<nnnnnn>
+# ──────────────────────────────────────────────
+resource "aws_dynamodb_table" "prompts" {
+  name         = "${local.prefix}-prompts"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  tags = {
+    Name = "${local.prefix}-prompts"
+  }
+}
+
+# ──────────────────────────────────────────────
 # OpenPositions table
 # Tracks one row per ticker per source.
 # BUY/POSITIVE → open_status=OPEN (no TTL)

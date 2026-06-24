@@ -21,15 +21,20 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+import promptadmin
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 region = os.environ["AWS_REGION_NAME"]
 dynamodb = boto3.resource("dynamodb", region_name=region)
+bedrock = boto3.client("bedrock-runtime", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 FEEDBACK_TABLE = os.environ.get("FEEDBACK_TABLE", "")
+PROMPTS_TABLE = os.environ.get("PROMPTS_TABLE", "")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 
 RANGE_DAYS = {"today": 1, "week": 7, "month": 30}
 CLOSE_ACTIONS = {"CLOSE", "SELL", "STOP_LOSS", "NEGATIVE"}
@@ -393,6 +398,25 @@ def lambda_handler(event: dict, _context) -> dict:
                    .get("claims", {}).get("sub"))
             result = _submit_feedback(sub, variables)
             return _response(200, {"data": {"submitFeedback": _to_jsonable(result)}})
+
+        if any(k in query for k in ("promptState", "suggestPrompt", "approvePrompt", "discardPrompt", "rollbackPrompt")):
+            if not PROMPTS_TABLE:
+                return _response(503, {"errors": [{"message": "Prompt tuning is not configured."}]})
+            if "promptState" in query:
+                state = promptadmin.get_state(dynamodb, PROMPTS_TABLE)
+                return _response(200, {"data": {"promptState": _to_jsonable(state)}})
+            if "suggestPrompt" in query:
+                res = promptadmin.suggest(dynamodb, bedrock, BEDROCK_MODEL_ID, PROMPTS_TABLE, FEEDBACK_TABLE)
+                return _response(200, {"data": {"suggestPrompt": _to_jsonable(res)}})
+            if "approvePrompt" in query:
+                res = promptadmin.approve(dynamodb, PROMPTS_TABLE, FEEDBACK_TABLE)
+                return _response(200, {"data": {"approvePrompt": _to_jsonable(res)}})
+            if "discardPrompt" in query:
+                res = promptadmin.discard(dynamodb, PROMPTS_TABLE)
+                return _response(200, {"data": {"discardPrompt": _to_jsonable(res)}})
+            if "rollbackPrompt" in query:
+                res = promptadmin.rollback(dynamodb, PROMPTS_TABLE, int(variables.get("version") or 0))
+                return _response(200, {"data": {"rollbackPrompt": _to_jsonable(res)}})
 
         if "recommendations" in query:
             ticker = _extract_ticker(str(variables.get("ticker") or ""))

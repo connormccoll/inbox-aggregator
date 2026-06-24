@@ -105,6 +105,12 @@ const CHAT_QUERY = `query ChatQuery($prompt: String!) { chatQuery(prompt: $promp
 const RECENT_QUERY = `query Recent($range: String!) { recentRecommendations(range: $range) { id message_id ticker action source email_date sentiment confidence email_subject price_target stop_loss_price instrument_type option_symbol } }`
 const FEEDBACK_MUT = `mutation Feedback($messageId:String!,$ticker:String!,$reason:String,$note:String,$modelAction:String,$source:String,$emailSubject:String){ submitFeedback(messageId:$messageId,ticker:$ticker,reason:$reason,note:$note,modelAction:$modelAction,source:$source,emailSubject:$emailSubject){ ok message error } }`
 
+const PROMPT_STATE = `query { promptState { current_version current_body pending { reasoning changes diff based_on } history { version note reasoning created_at } } }`
+const PROMPT_SUGGEST = `mutation { suggestPrompt { ok error pending { reasoning changes diff based_on } } }`
+const PROMPT_APPROVE = `mutation { approvePrompt { ok error current_version } }`
+const PROMPT_DISCARD = `mutation { discardPrompt { ok } }`
+const PROMPT_ROLLBACK = `mutation Rollback($version: Int!) { rollbackPrompt(version: $version) { ok error current_version } }`
+
 function actionClass(action) {
   const a = (action || '').toUpperCase()
   if (['BUY', 'POSITIVE'].includes(a)) return 'badge-buy'
@@ -219,6 +225,7 @@ function Shell({ profile }) {
           {menuOpen && (
             <div className="user-menu" role="menu">
               <button type="button" className="menu-item" onClick={() => { setView('settings'); setMenuOpen(false) }}>Notification settings</button>
+              <button type="button" className="menu-item" onClick={() => { setView('tuning'); setMenuOpen(false) }}>Prompt tuning</button>
               <button type="button" className="menu-item" onClick={logout}>Sign out</button>
             </div>
           )}
@@ -230,6 +237,12 @@ function Shell({ profile }) {
             <button type="button" className="btn-link back" onClick={() => setView('home')}>← Back to recommendations</button>
             <h2 className="panel-title">Notification settings</h2>
             <Channels />
+          </section>
+        ) : view === 'tuning' ? (
+          <section className="panel">
+            <button type="button" className="btn-link back" onClick={() => setView('home')}>← Back to recommendations</button>
+            <h2 className="panel-title">Prompt tuning</h2>
+            <PromptTuning />
           </section>
         ) : (
           <>
@@ -346,6 +359,100 @@ function FeedCard({ rec }) {
         </div>
       )}
     </div>
+  )
+}
+
+function PromptTuning() {
+  const [state, setState] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [showCurrent, setShowCurrent] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try { const d = await gql(PROMPT_STATE); setState(d.promptState) }
+    catch (e) { setError(e.message) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function run(query, vars, okMsg) {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const d = await gql(query, vars)
+      const res = d.suggestPrompt || d.approvePrompt || d.discardPrompt || d.rollbackPrompt
+      if (res && res.ok === false) { setError(res.error || 'Action failed.'); return }
+      if (okMsg) setNotice(okMsg)
+      await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  if (loading) return <p className="intro">Loading prompt…</p>
+  if (!state) return <div className="submit-error">{error || 'Could not load prompt state.'}</div>
+  const pending = state.pending
+  return (
+    <div className="tuning">
+      {error && <div className="submit-error">{error}</div>}
+      {notice && <div className="notice">{notice}</div>}
+      <div className="tune-row">
+        <span>Active version <strong>v{state.current_version}</strong></span>
+        <button type="button" className="btn-link" onClick={() => setShowCurrent((v) => !v)}>{showCurrent ? 'Hide' : 'View'} current prompt</button>
+      </div>
+      {showCurrent && <pre className="prompt-pre">{state.current_body}</pre>}
+
+      {!pending ? (
+        <div className="tune-suggest">
+          <p className="intro">Draft a prompt improvement from your flagged recommendations.</p>
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => run(PROMPT_SUGGEST, null, '')}>{busy ? 'Drafting…' : 'Generate suggestion from feedback'}</button>
+        </div>
+      ) : (
+        <div className="pending">
+          <h3 className="panel-title">Proposed change · based on {pending.based_on} flag{pending.based_on === 1 ? '' : 's'}</h3>
+          {pending.reasoning && <p className="fc-sentiment">{pending.reasoning}</p>}
+          {pending.changes && pending.changes.length > 0 && (
+            <ul className="change-list">{pending.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+          )}
+          <DiffView diff={pending.diff} />
+          <div className="fb-actions">
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => run(PROMPT_APPROVE, null, 'Approved — the new version is live.')}>{busy ? 'Working…' : 'Approve & deploy'}</button>
+            <button type="button" className="btn-link danger" disabled={busy} onClick={() => run(PROMPT_DISCARD, null, 'Suggestion discarded.')}>Discard</button>
+          </div>
+        </div>
+      )}
+
+      {state.history && state.history.length > 0 && (
+        <div className="history">
+          <h3 className="panel-title">Version history</h3>
+          <ul className="channel-list">
+            {state.history.map((h) => (
+              <li key={h.version} className="channel-row">
+                <div className="channel-main">
+                  <span className="channel-type">v{h.version}</span>
+                  <span className="channel-value">{h.reasoning || h.note || '—'}</span>
+                  <button type="button" className="btn-link" disabled={busy || h.version === state.current_version} onClick={() => run(PROMPT_ROLLBACK, { version: h.version }, `Rolled back to v${h.version}.`)}>{h.version === state.current_version ? 'Active' : 'Roll back'}</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DiffView({ diff }) {
+  if (!diff) return <p className="chat-empty">No line-level differences.</p>
+  return (
+    <pre className="diff">
+      {diff.split('\n').map((ln, i) => {
+        let cls = 'diff-ctx'
+        if (ln.startsWith('+') && !ln.startsWith('+++')) cls = 'diff-add'
+        else if (ln.startsWith('-') && !ln.startsWith('---')) cls = 'diff-del'
+        else if (ln.startsWith('@@')) cls = 'diff-hunk'
+        return <div key={i} className={cls}>{ln || ' '}</div>
+      })}
+    </pre>
   )
 }
 

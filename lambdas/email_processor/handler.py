@@ -34,6 +34,7 @@ RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 PROCESSED_EMAILS_TABLE = os.environ["PROCESSED_EMAILS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
+PROMPTS_TABLE = os.environ.get("PROMPTS_TABLE", "")
 
 PROCESSED_TABLE_TTL_DAYS = 30
 RECOMMENDATIONS_TTL_DAYS = 365
@@ -199,8 +200,35 @@ def _mark_processed(table, message_id: str) -> bool:
         raise
 
 
-def _extract_with_bedrock(email: dict) -> dict:
-    prompt = EXTRACTION_PROMPT.format(
+def _valid_template(template: str) -> bool:
+    if not all(p in template for p in ("{subject}", "{sender}", "{email_date}", "{body}")):
+        return False
+    try:
+        template.format(subject="x", sender="x", email_date="x", body="x")
+        return True
+    except (KeyError, IndexError, ValueError):
+        return False
+
+
+def _load_active_prompt() -> str:
+    """Active prompt from the versioned store, falling back to the built-in base."""
+    if PROMPTS_TABLE:
+        try:
+            item = dynamodb.Table(PROMPTS_TABLE).get_item(
+                Key={"PK": "PROMPT#extraction", "SK": "CURRENT"}
+            ).get("Item")
+            body = item.get("body") if item else None
+            if body and _valid_template(body):
+                return body
+            if body:
+                logger.error("Stored prompt failed validation - using base prompt.")
+        except Exception as exc:
+            logger.error("Could not load active prompt: %s - using base.", exc)
+    return EXTRACTION_PROMPT
+
+
+def _extract_with_bedrock(email: dict, prompt_template: str) -> dict:
+    prompt = prompt_template.format(
         subject=email["subject"],
         sender=email["sender"],
         email_date=email["date"],
@@ -422,6 +450,7 @@ def lambda_handler(event: dict, context) -> dict:
     recommendations_table = dynamodb.Table(RECOMMENDATIONS_TABLE)
     open_positions_table = dynamodb.Table(OPEN_POSITIONS_TABLE)
 
+    active_prompt = _load_active_prompt()
     failed_items = []
 
     for record in event.get("Records", []):
@@ -441,7 +470,7 @@ def lambda_handler(event: dict, context) -> dict:
             logger.info("Fetched email: subject=%r sender=%r", email["subject"], email["sender"])
 
             # Step 3: Extract with Bedrock
-            extracted = _extract_with_bedrock(email)
+            extracted = _extract_with_bedrock(email, active_prompt)
             logger.info(
                 "Extraction result: %d recommendations",
                 len(extracted.get("recommendations", [])),

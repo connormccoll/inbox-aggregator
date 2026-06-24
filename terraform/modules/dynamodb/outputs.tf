@@ -41,3 +41,11 @@ output "feedback_table_name" {
 output "feedback_table_arn" {
   value = aws_dynamodb_table.feedback.arn
 }
+
+output "prompts_table_name" {
+  value = aws_dynamodb_table.prompts.name
+}
+
+output "prompts_table_arn" {
+  value = aws_dynamodb_table.prompts.arn
+}

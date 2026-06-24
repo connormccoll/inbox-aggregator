@@ -523,3 +523,22 @@ h1 {
 .chip-on { border-color: #2563eb; color: #93c5fd; background: #0c2a4d; }
 .fb-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .query-panel { border-top: 0.5px solid #1e2a3a; padding-top: 18px; }
+
+/* ── prompt tuning ────────────────────────────────────────────── */
+.tune-row { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: #cbd5e1; margin-bottom: 10px; }
+.tune-suggest { border: 0.5px solid #1e2a3a; border-radius: 12px; padding: 14px; }
+.prompt-pre, .diff {
+  background: #0d0f14; border: 0.5px solid #1e2a3a; border-radius: 8px;
+  padding: 10px 12px; font-family: ui-monospace, monospace; font-size: 12px;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; margin: 8px 0;
+}
+.diff { white-space: pre; }
+.diff div { white-space: pre-wrap; word-break: break-word; }
+.diff-add { color: #6ee7b7; background: #052e22; }
+.diff-del { color: #fca5a5; background: #3b1414; }
+.diff-hunk { color: #93c5fd; }
+.diff-ctx { color: #64748b; }
+.pending { border: 0.5px solid #2563eb; border-radius: 12px; padding: 14px; margin-bottom: 18px; }
+.change-list { margin: 8px 0; padding-left: 18px; font-size: 13px; color: #cbd5e1; }
+.change-list li { margin-bottom: 4px; }
+.history { margin-top: 18px; }

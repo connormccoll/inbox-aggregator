@@ -104,6 +104,7 @@ data "aws_iam_policy_document" "dynamodb_readwrite" {
       "${module.dynamodb.open_positions_table_arn}/index/*",
       module.dynamodb.feedback_table_arn,
       "${module.dynamodb.feedback_table_arn}/index/*",
+      module.dynamodb.prompts_table_arn,
     ]
   }
 }
@@ -206,6 +207,7 @@ module "lambda_email_processor" {
     RECOMMENDATIONS_TABLE    = module.dynamodb.recommendations_table_name
     PROCESSED_EMAILS_TABLE   = module.dynamodb.processed_emails_table_name
     OPEN_POSITIONS_TABLE     = module.dynamodb.open_positions_table_name
+    PROMPTS_TABLE            = module.dynamodb.prompts_table_name
     GMAIL_SECRET_NAME        = module.secrets.gmail_secret_name
     BEDROCK_MODEL_ID         = var.bedrock_model_id
     AWS_REGION_NAME          = var.aws_region
@@ -452,11 +454,14 @@ module "lambda_graphql_query" {
     RECOMMENDATIONS_TABLE = module.dynamodb.recommendations_table_name
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
     FEEDBACK_TABLE        = module.dynamodb.feedback_table_name
+    PROMPTS_TABLE         = module.dynamodb.prompts_table_name
+    BEDROCK_MODEL_ID      = var.bedrock_model_id
     AWS_REGION_NAME       = var.aws_region
   }
 
   inline_policies = {
     dynamodb-readwrite = data.aws_iam_policy_document.dynamodb_readwrite.json
+    bedrock-invoke     = data.aws_iam_policy_document.bedrock_invoke.json
   }
 }
 
