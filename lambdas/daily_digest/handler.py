@@ -26,6 +26,7 @@ RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 USERS_TABLE = os.environ["USERS_TABLE"]
 ORIGINATION_NUMBER = os.environ.get("ORIGINATION_NUMBER", "")
 PUSHOVER_API_TOKEN = os.environ.get("PUSHOVER_API_TOKEN", "")
+APP_URL = os.environ.get("APP_URL", "")
 
 # Ordering preference for digest sections
 ACTION_ORDER = ["STOP_LOSS", "SELL", "BUY", "HOLD", "POSITIVE", "NEGATIVE"]
@@ -48,7 +49,7 @@ def _get_todays_recommendations(date_str: str) -> list[dict]:
 
 def _build_digest(date_str: str, recommendations: list[dict]) -> str:
     if not recommendations:
-        return f"[INBOX] Digest {date_str}\nNo recommendations found today."
+        return f"[INBOX] Daily Ticker Tape {date_str}\nNo recommendations found today."
 
     # Group by action
     by_action: dict[str, list[str]] = {}
@@ -59,7 +60,7 @@ def _build_digest(date_str: str, recommendations: list[dict]) -> str:
         label = f"{ticker} ({source})" if source else ticker
         by_action.setdefault(action, []).append(label)
 
-    lines = [f"[INBOX] Digest {date_str}"]
+    lines = [f"[INBOX] Daily Ticker Tape {date_str}"]
 
     for action in ACTION_ORDER:
         if action in by_action:
@@ -87,14 +88,21 @@ def lambda_handler(event: dict, context) -> None:
         return
 
     digest = _build_digest(today, recommendations)
-    logger.info("Digest message:\n%s", digest)
+    logger.info("Ticker tape message:\n%s", digest)
 
-    notify.dispatch(
-        channels,
-        sns,
-        sms_message=digest,
-        pushover_title=f"[INBOX] Daily Digest {today}",
-        pushover_message=digest,
-        origination_number=ORIGINATION_NUMBER,
-        pushover_token=PUSHOVER_API_TOKEN,
-    )
+    title = f"[INBOX] Daily Ticker Tape {today}"
+    sms_body = digest + (f"\n{APP_URL}" if APP_URL else "")
+
+    for ch in channels:
+        ctype = ch.get("channel_type", "")
+        value = ch.get("value", "")
+        if not value:
+            continue
+        try:
+            if ctype == "SMS":
+                notify.send_sms(sns, value, sms_body, ORIGINATION_NUMBER)
+            elif ctype == "PUSHOVER" and PUSHOVER_API_TOKEN:
+                notify.send_pushover(PUSHOVER_API_TOKEN, value, title, digest,
+                                     url=APP_URL, url_title="Open Inbox Aggregator")
+        except Exception as exc:
+            logger.error("Ticker tape delivery failed type=%s value=%s: %s", ctype, value, exc)

@@ -317,6 +317,7 @@ module "lambda_daily_digest" {
     AWS_REGION_NAME       = var.aws_region
     ORIGINATION_NUMBER    = var.origination_number
     PUSHOVER_API_TOKEN    = var.pushover_api_token
+    APP_URL               = "https://${aws_cloudfront_distribution.frontend.domain_name}"
   }
 
   inline_policies = {

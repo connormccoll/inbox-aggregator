@@ -53,13 +53,19 @@ def send_sms(sns, phone: str, message: str, origination_number: str = "") -> boo
     return True
 
 
-def send_pushover(token: str, user_key: str, title: str, message: str) -> None:
-    data = urllib.parse.urlencode({
+def send_pushover(token: str, user_key: str, title: str, message: str,
+                  url: str = "", url_title: str = "") -> None:
+    payload = {
         "token": token,
         "user": user_key,
         "title": title,
         "message": message[:1024],
-    }).encode()
+    }
+    if url:
+        payload["url"] = url
+        if url_title:
+            payload["url_title"] = url_title
+    data = urllib.parse.urlencode(payload).encode()
     req = urllib.request.Request(PUSHOVER_URL, data=data)
     urllib.request.urlopen(req, timeout=10)
 
