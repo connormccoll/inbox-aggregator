@@ -386,6 +386,20 @@ def _parse_query_with_bedrock(prompt: str) -> dict:
         return {}
 
 
+def _range_cutoff(rng):
+    if rng not in RANGE_DAYS:
+        return None
+    today = datetime.now(timezone.utc).date()
+    return (today - timedelta(days=RANGE_DAYS[rng] - 1)).strftime("%Y-%m-%d")
+
+
+def _filter_by_range(rows: list[dict], rng, date_key: str) -> list[dict]:
+    cutoff = _range_cutoff(rng)
+    if not cutoff:
+        return rows
+    return [r for r in rows if str(r.get(date_key) or "") >= cutoff]
+
+
 def _run_smart_query(prompt: str, overrides: dict) -> dict:
     parsed = _parse_query_with_bedrock(prompt)
     raw_ticker = str(overrides.get("ticker") or parsed.get("ticker") or "").upper().strip()
@@ -400,14 +414,18 @@ def _run_smart_query(prompt: str, overrides: dict) -> dict:
     used = {"ticker": ticker, "source": source, "closes_only": closes_only,
             "range": rng, "action": action}
 
+    range_label = f" ({rng})" if rng in RANGE_DAYS else ""
+
     if ticker and closes_only:
         rows = [_format_close_row(r) for r in _query_close_events(ticker, source)]
-        summary = f"Found {len(rows)} close event(s) for {ticker}" + (f" by {source}" if source else "") + "."
+        rows = _filter_by_range(rows, rng, "close_date")
+        summary = f"Found {len(rows)} close event(s) for {ticker}" + (f" by {source}" if source else "") + range_label + "."
         return {"summary": summary, "rows": rows, "intent": "closeEvents", "parsed": used}
 
     if ticker:
-        rows = [_format_recommendation_row(r) for r in _query_recommendations(ticker, 25)]
-        summary = f"Found {len(rows)} recommendation(s) for {ticker}."
+        rows = [_format_recommendation_row(r) for r in _query_recommendations(ticker, 100)]
+        rows = _filter_by_range(rows, rng, "email_date")
+        summary = f"Found {len(rows)} recommendation(s) for {ticker}{range_label}."
         return {"summary": summary, "rows": rows, "intent": "recommendations", "parsed": used}
 
     rkey = rng if rng in RANGE_DAYS else "week"
