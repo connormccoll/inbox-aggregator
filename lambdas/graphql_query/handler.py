@@ -352,6 +352,80 @@ def _submit_feedback(sub: str | None, variables: dict) -> dict:
     return {"ok": True, "message": "Thanks - feedback recorded."}
 
 
+def _strip_json(text: str) -> dict:
+    if "```" in text:
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if m:
+            text = m.group(1).strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _parse_query_with_bedrock(prompt: str) -> dict:
+    if not (prompt and BEDROCK_MODEL_ID):
+        return {}
+    meta = (
+        "Parse this question about a stock-recommendation database into JSON filters. "
+        "Return ONLY JSON with keys: ticker (uppercase symbol or null), source "
+        "(publication name or null), closes_only (boolean), range (one of "
+        '"today","week","month" or null), action (BUY/SELL/STOP_LOSS/CLOSE/POSITIVE/'
+        "NEGATIVE/HOLD or null).\n"
+        f'Question: "{prompt}"'
+    )
+    try:
+        resp = bedrock.converse(
+            modelId=BEDROCK_MODEL_ID,
+            messages=[{"role": "user", "content": [{"text": meta}]}],
+            inferenceConfig={"maxTokens": 300},
+        )
+        return _strip_json(resp["output"]["message"]["content"][0]["text"].strip())
+    except Exception as exc:
+        logger.error("query parse failed: %s", exc)
+        return {}
+
+
+def _run_smart_query(prompt: str, overrides: dict) -> dict:
+    parsed = _parse_query_with_bedrock(prompt)
+    raw_ticker = str(overrides.get("ticker") or parsed.get("ticker") or "").upper().strip()
+    ticker = _extract_ticker(raw_ticker) if raw_ticker else None
+    if not ticker:
+        ticker = _extract_ticker(prompt or "")
+    source = (overrides.get("source") or parsed.get("source") or "") or None
+    closes_only = bool(overrides.get("closesOnly")) or bool(parsed.get("closes_only"))
+    rng = overrides.get("range") or parsed.get("range")
+    action = (parsed.get("action") or "") or None
+
+    used = {"ticker": ticker, "source": source, "closes_only": closes_only,
+            "range": rng, "action": action}
+
+    if ticker and closes_only:
+        rows = [_format_close_row(r) for r in _query_close_events(ticker, source)]
+        summary = f"Found {len(rows)} close event(s) for {ticker}" + (f" by {source}" if source else "") + "."
+        return {"summary": summary, "rows": rows, "intent": "closeEvents", "parsed": used}
+
+    if ticker:
+        rows = [_format_recommendation_row(r) for r in _query_recommendations(ticker, 25)]
+        summary = f"Found {len(rows)} recommendation(s) for {ticker}."
+        return {"summary": summary, "rows": rows, "intent": "recommendations", "parsed": used}
+
+    rkey = rng if rng in RANGE_DAYS else "week"
+    rows = _query_recent(rkey)
+    if source:
+        rows = [r for r in rows if source.lower() in str(r.get("source", "")).lower()]
+    if action:
+        rows = [r for r in rows if str(r.get("action", "")).upper() == action.upper()]
+    bits = []
+    if action:
+        bits.append(action)
+    if source:
+        bits.append(f"from {source}")
+    label = (" ".join(bits) + " ") if bits else ""
+    summary = f"Found {len(rows)} {label}recommendation(s) ({rkey})."
+    return {"summary": summary, "rows": rows, "intent": "recommendations", "parsed": used}
+
+
 def _in_active_group(event: dict) -> bool:
     """True if the caller's Cognito token carries the 'active' group claim."""
     claims = (
@@ -387,6 +461,15 @@ def lambda_handler(event: dict, _context) -> dict:
             prompt = str(variables.get("prompt") or "")
             result = _run_chat_query(prompt)
             return _response(200, {"data": {"chatQuery": _to_jsonable(result)}})
+
+        if "smartQuery" in query:
+            result = _run_smart_query(str(variables.get("prompt") or ""), {
+                "ticker": variables.get("ticker"),
+                "source": variables.get("source"),
+                "closesOnly": variables.get("closesOnly"),
+                "range": variables.get("range"),
+            })
+            return _response(200, {"data": {"smartQuery": _to_jsonable(result)}})
 
         if "recentRecommendations" in query:
             range_key = str(variables.get("range") or "today").lower()

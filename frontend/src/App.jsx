@@ -102,6 +102,7 @@ async function gql(query, variables) {
 }
 
 const CHAT_QUERY = `query ChatQuery($prompt: String!) { chatQuery(prompt: $prompt) { summary intent rows } }`
+const SMART_QUERY = `query Smart($prompt:String,$ticker:String,$source:String,$closesOnly:Boolean,$range:String){ smartQuery(prompt:$prompt,ticker:$ticker,source:$source,closesOnly:$closesOnly,range:$range){ summary intent parsed rows } }`
 const RECENT_QUERY = `query Recent($range: String!) { recentRecommendations(range: $range) { id message_id ticker action source email_date sentiment confidence email_subject price_target stop_loss_price instrument_type option_symbol } }`
 const FEEDBACK_MUT = `mutation Feedback($messageId:String!,$ticker:String!,$reason:String,$note:String,$modelAction:String,$source:String,$emailSubject:String){ submitFeedback(messageId:$messageId,ticker:$ticker,reason:$reason,note:$note,modelAction:$modelAction,source:$source,emailSubject:$emailSubject){ ok message error } }`
 
@@ -350,7 +351,7 @@ function FeedCard({ rec }) {
               <button key={r.code} type="button" className={`chip ${reason === r.code ? 'chip-on' : ''}`} onClick={() => setReason(reason === r.code ? '' : r.code)}>{r.label}</button>
             ))}
           </div>
-          <input type="text" placeholder="Optional: what should it have been?" value={note} onChange={(e) => setNote(e.target.value)} />
+          <textarea className="fb-note" rows={2} placeholder="Optional: what should it have been?" value={note} onChange={(e) => setNote(e.target.value)} />
           {error && <div className="submit-error">{error}</div>}
           <div className="fb-actions">
             <button type="button" className="btn-small" disabled={busy} onClick={submit}>{busy ? 'Saving…' : 'Submit feedback'}</button>
@@ -458,29 +459,46 @@ function DiffView({ diff }) {
 
 function QueryPanel() {
   const [prompt, setPrompt] = useState('')
+  const [ticker, setTicker] = useState('')
+  const [source, setSource] = useState('')
+  const [closesOnly, setClosesOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   async function submit(e) {
     e.preventDefault()
-    if (!prompt.trim()) return setError('Enter a question.')
+    if (!prompt.trim() && !ticker.trim() && !source.trim()) return setError('Enter a question or a filter.')
     setError(''); setLoading(true)
     try {
-      const data = await gql(CHAT_QUERY, { prompt: prompt.trim() })
-      setResult(data.chatQuery || null)
+      const data = await gql(SMART_QUERY, { prompt: prompt.trim(), ticker: ticker.trim(), source: source.trim(), closesOnly })
+      setResult(data.smartQuery || null)
     } catch (err) { setResult(null); setError(err.message) } finally { setLoading(false) }
   }
   return (
     <section className="panel query-panel">
       <h2 className="panel-title">Ask about a ticker or source</h2>
       <form onSubmit={submit} className="chat-form">
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder='e.g. "recommendations for TSLA" or "when did Brownstone close MSTR?"' />
+        <div className="query-filters">
+          <input className="qf" type="text" placeholder="Ticker" value={ticker} onChange={(e) => setTicker(e.target.value)} />
+          <input className="qf" type="text" placeholder="Source" value={source} onChange={(e) => setSource(e.target.value)} />
+          <label className="qf-toggle"><input type="checkbox" checked={closesOnly} onChange={(e) => setClosesOnly(e.target.checked)} /> Closes only</label>
+        </div>
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder={'e.g. "what did InvestorPlace say about NVDA?" or "stop-losses this week"'} />
         {error && <div className="submit-error">{error}</div>}
         <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Querying…' : 'Ask'}</button>
       </form>
       {result && (
         <div className="chat-result">
           <p className="chat-summary">{result.summary || 'Query completed.'}</p>
+          {result.parsed && (result.parsed.ticker || result.parsed.source || result.parsed.action || result.parsed.closes_only || result.parsed.range) && (
+            <div className="parsed-chips">
+              {result.parsed.ticker && <span className="pchip">{result.parsed.ticker}</span>}
+              {result.parsed.action && <span className="pchip">{result.parsed.action}</span>}
+              {result.parsed.source && <span className="pchip">{result.parsed.source}</span>}
+              {result.parsed.closes_only && <span className="pchip">closes only</span>}
+              {result.parsed.range && <span className="pchip">{result.parsed.range}</span>}
+            </div>
+          )}
           <QueryRows rows={result.rows || []} intent={result.intent} />
         </div>
       )}

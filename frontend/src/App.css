@@ -542,3 +542,13 @@ h1 {
 .change-list { margin: 8px 0; padding-left: 18px; font-size: 13px; color: #cbd5e1; }
 .change-list li { margin-bottom: 4px; }
 .history { margin-top: 18px; }
+
+/* ── feedback note + query filters ────────────────────────────── */
+.feedback-form input, .feedback-form textarea { width: 100%; box-sizing: border-box; }
+.fb-note { resize: vertical; min-height: 40px; }
+.query-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.qf { flex: 1; min-width: 130px; }
+.qf-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #94a3b8; white-space: nowrap; }
+.qf-toggle input { width: auto; }
+.parsed-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 10px; }
+.pchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: #0c2a4d; color: #93c5fd; }
