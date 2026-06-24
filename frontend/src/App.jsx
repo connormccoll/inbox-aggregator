@@ -8,25 +8,21 @@ const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || window.location.origin
 
 const TK = { id: 'ia_id_token', access: 'ia_access_token', refresh: 'ia_refresh_token', pkce: 'ia_pkce_verifier' }
 
-// ── token storage ────────────────────────────────────────────────────────────
 const store = {
   get: (k) => sessionStorage.getItem(k),
   set: (k, v) => sessionStorage.setItem(k, v),
   clearTokens: () => [TK.id, TK.access, TK.refresh].forEach((k) => sessionStorage.removeItem(k)),
 }
 
-// ── small helpers ──────────────────────────────────────────────────────────────
 function b64url(bytes) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
-
 async function makePkce() {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
   return { verifier, challenge: b64url(digest) }
 }
-
 function decodeJwt(token) {
   try {
     const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
@@ -35,50 +31,35 @@ function decodeJwt(token) {
     return {}
   }
 }
-
 function groupsFromIdToken() {
   const id = store.get(TK.id)
   if (!id) return []
-  const claims = decodeJwt(id)
-  const g = claims['cognito:groups']
+  const g = decodeJwt(id)['cognito:groups']
   return Array.isArray(g) ? g : g ? [g] : []
 }
 
-// ── OAuth (Cognito Hosted UI, authorization-code + PKCE) ───────────────────────
 async function login() {
   const { verifier, challenge } = await makePkce()
   store.set(TK.pkce, verifier)
   const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope: 'openid email profile',
-    identity_provider: 'Google',
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
+    response_type: 'code', client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
+    scope: 'openid email profile', identity_provider: 'Google',
+    code_challenge: challenge, code_challenge_method: 'S256',
   })
   window.location.assign(`${COGNITO_DOMAIN}/oauth2/authorize?${params.toString()}`)
 }
-
 function logout() {
   store.clearTokens()
   const params = new URLSearchParams({ client_id: CLIENT_ID, logout_uri: REDIRECT_URI })
   window.location.assign(`${COGNITO_DOMAIN}/logout?${params.toString()}`)
 }
-
 async function exchangeCodeForTokens(code) {
-  const verifier = store.get(TK.pkce) || ''
   const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    client_id: CLIENT_ID,
-    code,
-    redirect_uri: REDIRECT_URI,
-    code_verifier: verifier,
+    grant_type: 'authorization_code', client_id: CLIENT_ID, code,
+    redirect_uri: REDIRECT_URI, code_verifier: store.get(TK.pkce) || '',
   })
   const res = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
   })
   if (!res.ok) throw new Error('Token exchange failed')
   const t = await res.json()
@@ -86,15 +67,12 @@ async function exchangeCodeForTokens(code) {
   if (t.access_token) store.set(TK.access, t.access_token)
   if (t.refresh_token) store.set(TK.refresh, t.refresh_token)
 }
-
 async function refreshTokens() {
   const rt = store.get(TK.refresh)
   if (!rt) return false
   const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: CLIENT_ID, refresh_token: rt })
   const res = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
   })
   if (!res.ok) return false
   const t = await res.json()
@@ -102,8 +80,6 @@ async function refreshTokens() {
   if (t.access_token) store.set(TK.access, t.access_token)
   return true
 }
-
-// authenticated fetch against the API; retries once after a token refresh on 401
 async function apiFetch(path, options = {}) {
   const doFetch = () =>
     fetch(`${API_URL}${path}`, {
@@ -115,39 +91,38 @@ async function apiFetch(path, options = {}) {
       },
     })
   let res = await doFetch()
-  if (res.status === 401 && (await refreshTokens())) {
-    res = await doFetch()
-  }
+  if (res.status === 401 && (await refreshTokens())) res = await doFetch()
   return res
 }
+async function gql(query, variables) {
+  const res = await apiFetch('/graphql', { method: 'POST', body: JSON.stringify({ query, variables }) })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data.errors?.length) throw new Error(data.errors?.[0]?.message || `Request failed (${res.status})`)
+  return data.data
+}
 
-// ── recommendations query (now behind auth) ───────────────────────────────────
-const CHAT_QUERY = `
-  query ChatQuery($prompt: String!) {
-    chatQuery(prompt: $prompt) { summary intent rows }
-  }
-`
+const CHAT_QUERY = `query ChatQuery($prompt: String!) { chatQuery(prompt: $prompt) { summary intent rows } }`
+const RECENT_QUERY = `query Recent($range: String!) { recentRecommendations(range: $range) { id message_id ticker action source email_date sentiment confidence email_subject price_target stop_loss_price instrument_type option_symbol } }`
+const FEEDBACK_MUT = `mutation Feedback($messageId:String!,$ticker:String!,$reason:String,$note:String,$modelAction:String,$source:String,$emailSubject:String){ submitFeedback(messageId:$messageId,ticker:$ticker,reason:$reason,note:$note,modelAction:$modelAction,source:$source,emailSubject:$emailSubject){ ok message error } }`
+
+function actionClass(action) {
+  const a = (action || '').toUpperCase()
+  if (['BUY', 'POSITIVE'].includes(a)) return 'badge-buy'
+  if (['SELL', 'STOP_LOSS', 'CLOSE', 'NEGATIVE'].includes(a)) return 'badge-sell'
+  return 'badge-neutral'
+}
 
 export default function App() {
-  const [authState, setAuthState] = useState('loading') // loading | anon | authed
+  const [authState, setAuthState] = useState('loading')
   const [profile, setProfile] = useState(null)
   const [active, setActive] = useState(false)
 
-  // bootstrap: handle OAuth callback or restore an existing session
   useEffect(() => {
     (async () => {
       const params = new URLSearchParams(window.location.search)
-      if (params.get('error')) {
-        window.history.replaceState({}, '', REDIRECT_URI)
-        setAuthState('anon')
-        return
-      }
+      if (params.get('error')) { window.history.replaceState({}, '', REDIRECT_URI); setAuthState('anon'); return }
       if (params.get('code')) {
-        try {
-          await exchangeCodeForTokens(params.get('code'))
-        } catch {
-          /* fall through to anon below */
-        }
+        try { await exchangeCodeForTokens(params.get('code')) } catch { /* noop */ }
         window.history.replaceState({}, '', REDIRECT_URI)
       }
       const id = store.get(TK.id)
@@ -163,44 +138,42 @@ export default function App() {
   }, [])
 
   const onRedeemed = useCallback(async () => {
-    // pull a fresh token so the new "active" group claim is present
     await refreshTokens()
     setActive(groupsFromIdToken().includes('active'))
   }, [])
 
-  return (
-    <div className="container container-chat">
-      <div className="card card-chat">
+  if (authState === 'loading') {
+    return <div className="container container-chat"><div className="card card-chat"><p className="intro">Loading…</p></div></div>
+  }
+  if (authState === 'anon') {
+    return (
+      <div className="container container-chat"><div className="card card-chat">
         <img src="/Inbox-Ag.png" alt="Inbox Aggregator" className="logo" />
         <h1>Inbox Aggregator</h1>
         <p className="tagline">Stock alert notifications</p>
-
-        {authState === 'loading' && <p className="intro">Loading…</p>}
-        {authState === 'anon' && <Landing />}
-        {authState === 'authed' && !active && (
-          <Redeem profile={profile} onRedeemed={onRedeemed} onSignOut={logout} />
-        )}
-        {authState === 'authed' && active && <Dashboard profile={profile} onSignOut={logout} />}
-      </div>
-    </div>
-  )
-}
-
-// ── views ───────────────────────────────────────────────────────────────────
-function Landing() {
-  return (
-    <div className="auth-landing">
-      <p className="intro">Sign in with the Google account you were invited with.</p>
-      <button type="button" className="btn-primary" onClick={login}>Sign in with Google</button>
-    </div>
-  )
+        <div className="auth-landing">
+          <p className="intro">Sign in with the Google account you were invited with.</p>
+          <button type="button" className="btn-primary" onClick={login}>Sign in with Google</button>
+        </div>
+      </div></div>
+    )
+  }
+  if (!active) {
+    return (
+      <div className="container container-chat"><div className="card card-chat">
+        <img src="/Inbox-Ag.png" alt="Inbox Aggregator" className="logo" />
+        <h1>Inbox Aggregator</h1>
+        <Redeem profile={profile} onRedeemed={onRedeemed} onSignOut={logout} />
+      </div></div>
+    )
+  }
+  return <Shell profile={profile} />
 }
 
 function Redeem({ profile, onRedeemed, onSignOut }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-
   async function submit(e) {
     e.preventDefault()
     if (!password.trim()) return setError('Enter the invitation password.')
@@ -208,218 +181,170 @@ function Redeem({ profile, onRedeemed, onSignOut }) {
     try {
       const res = await apiFetch('/redeem', { method: 'POST', body: JSON.stringify({ password }) })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data.error || 'Could not redeem. Check the password and try again.')
-        return
-      }
+      if (!res.ok) { setError(data.error || 'Could not redeem. Check the password and try again.'); return }
       await onRedeemed()
-    } catch {
-      setError('Network error. Please try again.')
-    } finally {
-      setBusy(false)
-    }
+    } catch { setError('Network error. Please try again.') } finally { setBusy(false) }
   }
-
   return (
     <form onSubmit={submit} className="form">
-      <p className="intro">
-        Signed in as <strong>{profile?.email || 'your account'}</strong>. Enter the invitation
-        password to activate your account.
-      </p>
+      <p className="intro">Signed in as <strong>{profile?.email || 'your account'}</strong>. Enter the invitation password to activate your account.</p>
       <div className="field">
         <label htmlFor="invpw">Invitation Password</label>
-        <input id="invpw" type="password" value={password} autoFocus
-          onChange={(e) => setPassword(e.target.value)} />
+        <input id="invpw" type="password" value={password} autoFocus onChange={(e) => setPassword(e.target.value)} />
         {error && <span className="error">{error}</span>}
       </div>
-      <button type="submit" className="btn-primary" disabled={busy}>
-        {busy ? 'Activating…' : 'Activate account'}
-      </button>
+      <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Activating…' : 'Activate account'}</button>
       <button type="button" className="btn-link" onClick={onSignOut}>Sign out</button>
     </form>
   )
 }
 
-function Dashboard({ profile, onSignOut }) {
-  const [tab, setTab] = useState('channels')
+function Shell({ profile }) {
+  const [view, setView] = useState('home')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const initial = (profile?.email || '?').charAt(0).toUpperCase()
   return (
-    <>
-      <div className="view-toggle" role="tablist">
-        <button type="button" className={`toggle-btn ${tab === 'channels' ? 'active' : ''}`}
-          onClick={() => setTab('channels')}>Notifications</button>
-        <button type="button" className={`toggle-btn ${tab === 'query' ? 'active' : ''}`}
-          onClick={() => setTab('query')}>Query</button>
-      </div>
-      <div className="account-bar">
-        <span className="account-email">{profile?.email}</span>
-        <button type="button" className="btn-link" onClick={onSignOut}>Sign out</button>
-      </div>
-      {tab === 'channels' ? <Channels /> : <QueryPanel />}
-    </>
+    <div className="app">
+      <header className="masthead">
+        <button type="button" className="brand" onClick={() => { setView('home'); setMenuOpen(false) }}>
+          <img src="/Inbox-Ag.png" alt="" className="brand-logo" />
+          <span className="brand-name">Inbox Aggregator</span>
+        </button>
+        <div className="user-area">
+          <button type="button" className="user-pill" onClick={() => setMenuOpen((o) => !o)} aria-haspopup="true" aria-expanded={menuOpen}>
+            <span className="avatar">{initial}</span>
+            <span className="user-email">{profile?.email}</span>
+            <span aria-hidden="true">▾</span>
+          </button>
+          {menuOpen && (
+            <div className="user-menu" role="menu">
+              <button type="button" className="menu-item" onClick={() => { setView('settings'); setMenuOpen(false) }}>Notification settings</button>
+              <button type="button" className="menu-item" onClick={logout}>Sign out</button>
+            </div>
+          )}
+        </div>
+      </header>
+      <main className="app-body">
+        {view === 'settings' ? (
+          <section className="panel">
+            <button type="button" className="btn-link back" onClick={() => setView('home')}>← Back to recommendations</button>
+            <h2 className="panel-title">Notification settings</h2>
+            <Channels />
+          </section>
+        ) : (
+          <>
+            <Feed />
+            <QueryPanel />
+          </>
+        )}
+      </main>
+    </div>
   )
 }
 
-const E164 = /^\+[1-9]\d{7,14}$/
+const RANGES = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This week' }, { key: 'month', label: 'This month' }]
+const REASONS = [
+  { code: 'wrong_action', label: 'Wrong action' },
+  { code: 'wrong_ticker', label: 'Wrong ticker' },
+  { code: 'not_a_rec', label: 'Not a rec' },
+  { code: 'wrong_source', label: 'Wrong source' },
+]
 
-function Channels() {
-  const [channels, setChannels] = useState([])
+function Feed() {
+  const [range, setRange] = useState('today')
+  const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [type, setType] = useState('PUSHOVER')
-  const [value, setValue] = useState('')
-  const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [codes, setCodes] = useState({}) // sk -> code input
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (r) => {
     setLoading(true); setError('')
     try {
-      const res = await apiFetch('/channels', { method: 'GET' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || 'Failed to load channels')
-      setChannels(data.channels || [])
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
+      const data = await gql(RECENT_QUERY, { range: r })
+      setRows(data.recentRecommendations || [])
+    } catch (e) { setError(e.message); setRows([]) } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(range) }, [load, range])
 
-  async function add(e) {
-    e.preventDefault()
-    setNotice(''); setError('')
-    const v = value.trim()
-    if (type === 'SMS' && !E164.test(v)) return setError('Phone must be E.164, e.g. +12125551234')
-    if (type === 'PUSHOVER' && v.length < 5) return setError('Enter a valid Pushover user key.')
-    setBusy(true)
-    try {
-      const res = await apiFetch('/channels', {
-        method: 'POST',
-        body: JSON.stringify({ action: 'add', type, value: v }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || 'Could not add channel')
-      setNotice(data.message || 'Channel added.')
-      setValue('')
-      await load()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+  return (
+    <section className="panel">
+      <div className="feed-head">
+        <div className="view-toggle" role="tablist">
+          {RANGES.map((r) => (
+            <button key={r.key} type="button" className={`toggle-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)}>{r.label}</button>
+          ))}
+        </div>
+        <span className="feed-count">{loading ? '…' : `${rows.length} recommendation${rows.length === 1 ? '' : 's'}`}</span>
+      </div>
+      {error && <div className="submit-error">{error}</div>}
+      {loading ? (
+        <p className="intro">Loading recommendations…</p>
+      ) : rows.length === 0 ? (
+        <p className="chat-empty">No recommendations in this period.</p>
+      ) : (
+        <div className="feed-list">{rows.map((r) => <FeedCard key={r.id} rec={r} />)}</div>
+      )}
+    </section>
+  )
+}
 
-  async function verify(ch) {
-    const code = (codes[ch.value] || '').trim()
-    if (!code) return setError('Enter the verification code.')
-    setBusy(true); setError(''); setNotice('')
-    try {
-      const res = await apiFetch('/channels', {
-        method: 'POST',
-        body: JSON.stringify({ action: 'verify', type: ch.type, value: ch.value, code }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || 'Verification failed')
-      setNotice(data.message || 'Channel verified.')
-      await load()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+function FeedCard({ rec }) {
+  const [flagging, setFlagging] = useState(false)
+  const [done, setDone] = useState(false)
+  const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
-  async function remove(ch) {
-    setBusy(true); setError(''); setNotice('')
+  async function submit() {
+    if (!reason && !note.trim()) { setError('Pick a reason or add a note.'); return }
+    setBusy(true); setError('')
     try {
-      const res = await apiFetch('/channels', {
-        method: 'DELETE',
-        body: JSON.stringify({ type: ch.type, value: ch.value }),
+      const data = await gql(FEEDBACK_MUT, {
+        messageId: rec.message_id, ticker: rec.ticker, reason, note: note.trim(),
+        modelAction: rec.action, source: rec.source, emailSubject: rec.email_subject,
       })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Could not remove channel')
-      }
-      await load()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
+      if (data.submitFeedback?.ok) { setDone(true); setFlagging(false) }
+      else setError(data.submitFeedback?.error || 'Could not save feedback.')
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
   return (
-    <div className="channels-panel">
-      <p className="intro">Where should alerts be delivered? Add one or more phones and Pushover keys.</p>
-
-      {loading ? (
-        <p className="intro">Loading channels…</p>
-      ) : channels.length === 0 ? (
-        <p className="chat-empty">No channels yet — add one below.</p>
-      ) : (
-        <ul className="channel-list">
-          {channels.map((ch) => (
-            <li key={`${ch.type}#${ch.value}`} className="channel-row">
-              <div className="channel-main">
-                <span className="channel-type">{ch.type === 'SMS' ? 'SMS' : 'Pushover'}</span>
-                <span className="channel-value">{ch.value}</span>
-                <span className={`badge ${ch.status === 'ACTIVE' ? 'badge-active' : 'badge-pending'}`}>
-                  {ch.status === 'ACTIVE' ? 'Active' : 'Pending'}
-                </span>
-              </div>
-              {ch.status !== 'ACTIVE' && (
-                <div className="channel-verify">
-                  <input
-                    type="text" inputMode="numeric" placeholder="6-digit code"
-                    value={codes[ch.value] || ''}
-                    onChange={(e) => setCodes({ ...codes, [ch.value]: e.target.value })}
-                  />
-                  <button type="button" className="btn-small" disabled={busy} onClick={() => verify(ch)}>
-                    Verify
-                  </button>
-                </div>
-              )}
-              <button type="button" className="btn-link danger" disabled={busy} onClick={() => remove(ch)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
+    <div className={`feed-card ${flagging ? 'flagging' : ''}`}>
+      <div className="feed-card-head">
+        <span className="fc-ticker">{rec.ticker}</span>
+        <span className={`badge ${actionClass(rec.action)}`}>{(rec.action || '').replace('_', ' ')}</span>
+        <span className="fc-meta">{rec.source || 'Unknown'} · {rec.email_date}</span>
+        {done ? (
+          <span className="fc-flagged"><span aria-hidden="true">✓</span> Flagged</span>
+        ) : (
+          <button type="button" className="flag-btn" aria-label="Flag as incorrect" onClick={() => setFlagging((f) => !f)}>⚐</button>
+        )}
+      </div>
+      {rec.sentiment && <p className="fc-sentiment">"{rec.sentiment}"</p>}
+      {(rec.price_target || rec.stop_loss_price || rec.option_symbol) && (
+        <div className="fc-tags">
+          {rec.price_target && <span className="fc-tag">Target ${rec.price_target}</span>}
+          {rec.stop_loss_price && <span className="fc-tag">Stop ${rec.stop_loss_price}</span>}
+          {rec.option_symbol && <span className="fc-tag">{rec.option_symbol}</span>}
+        </div>
       )}
-
-      <div className="divider" />
-
-      <form onSubmit={add} className="form add-channel">
-        <div className="field">
-          <label htmlFor="ch-type">Channel type</label>
-          <select id="ch-type" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="PUSHOVER">Pushover</option>
-            <option value="SMS">SMS</option>
-          </select>
+      {flagging && (
+        <div className="feedback-form">
+          <p className="fb-label">What's wrong with this recommendation?</p>
+          <div className="chips">
+            {REASONS.map((r) => (
+              <button key={r.code} type="button" className={`chip ${reason === r.code ? 'chip-on' : ''}`} onClick={() => setReason(reason === r.code ? '' : r.code)}>{r.label}</button>
+            ))}
+          </div>
+          <input type="text" placeholder="Optional: what should it have been?" value={note} onChange={(e) => setNote(e.target.value)} />
+          {error && <div className="submit-error">{error}</div>}
+          <div className="fb-actions">
+            <button type="button" className="btn-small" disabled={busy} onClick={submit}>{busy ? 'Saving…' : 'Submit feedback'}</button>
+            <button type="button" className="btn-link" onClick={() => setFlagging(false)}>Cancel</button>
+          </div>
         </div>
-        <div className="field">
-          <label htmlFor="ch-value">{type === 'SMS' ? 'Phone (E.164)' : 'Pushover user key'}</label>
-          <input id="ch-value" type="text" value={value}
-            placeholder={type === 'SMS' ? '+12125551234' : 'uXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'}
-            onChange={(e) => setValue(e.target.value)} />
-          {type === 'PUSHOVER' && (
-            <span className="hint">
-              Found in your{' '}
-              <a href="https://pushover.net/settings" target="_blank" rel="noopener noreferrer">Pushover settings</a>.
-            </span>
-          )}
-          {type === 'SMS' && (
-            <span className="hint">SMS verification requires an SNS origination number; until one is set it stays pending.</span>
-          )}
-        </div>
-        {error && <div className="submit-error">{error}</div>}
-        {notice && <div className="notice">{notice}</div>}
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? 'Working…' : 'Add channel'}
-        </button>
-      </form>
+      )}
     </div>
   )
 }
@@ -429,50 +354,30 @@ function QueryPanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
-
   async function submit(e) {
     e.preventDefault()
     if (!prompt.trim()) return setError('Enter a question.')
     setError(''); setLoading(true)
     try {
-      const res = await apiFetch('/graphql', {
-        method: 'POST',
-        body: JSON.stringify({ query: CHAT_QUERY, variables: { prompt: prompt.trim() } }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || data.errors?.length) {
-        setResult(null)
-        setError(data.errors?.[0]?.message || 'Query failed.')
-        return
-      }
-      setResult(data.data?.chatQuery || null)
-    } catch {
-      setResult(null)
-      setError('Network error while querying.')
-    } finally {
-      setLoading(false)
-    }
+      const data = await gql(CHAT_QUERY, { prompt: prompt.trim() })
+      setResult(data.chatQuery || null)
+    } catch (err) { setResult(null); setError(err.message) } finally { setLoading(false) }
   }
-
   return (
-    <div className="chat-panel">
-      <p className="intro">Ask things like: "recommendations for TSLA" or "when did Brownstone close MSTR?"</p>
+    <section className="panel query-panel">
+      <h2 className="panel-title">Ask about a ticker or source</h2>
       <form onSubmit={submit} className="chat-form">
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
-          placeholder="Ask about recommendations or close events..." />
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder='e.g. "recommendations for TSLA" or "when did Brownstone close MSTR?"' />
         {error && <div className="submit-error">{error}</div>}
-        <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Querying…' : 'Ask'}
-        </button>
+        <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Querying…' : 'Ask'}</button>
       </form>
       {result && (
         <div className="chat-result">
-          <h3>Result</h3>
           <p className="chat-summary">{result.summary || 'Query completed.'}</p>
           <QueryRows rows={result.rows || []} intent={result.intent} />
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -502,6 +407,110 @@ function QueryRows({ rows, intent }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+const E164 = /^\+[1-9]\d{7,14}$/
+
+function Channels() {
+  const [channels, setChannels] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [type, setType] = useState('PUSHOVER')
+  const [value, setValue] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [codes, setCodes] = useState({})
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await apiFetch('/channels', { method: 'GET' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Failed to load channels')
+      setChannels(data.channels || [])
+    } catch (e) { setError(e.message) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function add(e) {
+    e.preventDefault(); setNotice(''); setError('')
+    const v = value.trim()
+    if (type === 'SMS' && !E164.test(v)) return setError('Phone must be E.164, e.g. +12125551234')
+    if (type === 'PUSHOVER' && v.length < 5) return setError('Enter a valid Pushover user key.')
+    setBusy(true)
+    try {
+      const res = await apiFetch('/channels', { method: 'POST', body: JSON.stringify({ action: 'add', type, value: v }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Could not add channel')
+      setNotice(data.message || 'Channel added.'); setValue(''); await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+  async function verify(ch) {
+    const code = (codes[ch.value] || '').trim()
+    if (!code) return setError('Enter the verification code.')
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const res = await apiFetch('/channels', { method: 'POST', body: JSON.stringify({ action: 'verify', type: ch.type, value: ch.value, code }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Verification failed')
+      setNotice(data.message || 'Channel verified.'); await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+  async function remove(ch) {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const res = await apiFetch('/channels', { method: 'DELETE', body: JSON.stringify({ type: ch.type, value: ch.value }) })
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'Could not remove channel') }
+      await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="channels-panel">
+      <p className="intro">Where should alerts be delivered? Add one or more phones and Pushover keys.</p>
+      {loading ? <p className="intro">Loading channels…</p>
+        : channels.length === 0 ? <p className="chat-empty">No channels yet — add one below.</p>
+          : (
+            <ul className="channel-list">
+              {channels.map((ch) => (
+                <li key={`${ch.type}#${ch.value}`} className="channel-row">
+                  <div className="channel-main">
+                    <span className="channel-type">{ch.type === 'SMS' ? 'SMS' : 'Pushover'}</span>
+                    <span className="channel-value">{ch.value}</span>
+                    <span className={`badge ${ch.status === 'ACTIVE' ? 'badge-active' : 'badge-pending'}`}>{ch.status === 'ACTIVE' ? 'Active' : 'Pending'}</span>
+                  </div>
+                  {ch.status !== 'ACTIVE' && (
+                    <div className="channel-verify">
+                      <input type="text" inputMode="numeric" placeholder="6-digit code" value={codes[ch.value] || ''} onChange={(e) => setCodes({ ...codes, [ch.value]: e.target.value })} />
+                      <button type="button" className="btn-small" disabled={busy} onClick={() => verify(ch)}>Verify</button>
+                    </div>
+                  )}
+                  <button type="button" className="btn-link danger" disabled={busy} onClick={() => remove(ch)}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+      <div className="divider" />
+      <form onSubmit={add} className="form add-channel">
+        <div className="field">
+          <label htmlFor="ch-type">Channel type</label>
+          <select id="ch-type" value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="PUSHOVER">Pushover</option>
+            <option value="SMS">SMS</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="ch-value">{type === 'SMS' ? 'Phone (E.164)' : 'Pushover user key'}</label>
+          <input id="ch-value" type="text" value={value} placeholder={type === 'SMS' ? '+12125551234' : 'uXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'} onChange={(e) => setValue(e.target.value)} />
+          {type === 'PUSHOVER' && <span className="hint">Found in your <a href="https://pushover.net/settings" target="_blank" rel="noopener noreferrer">Pushover settings</a>.</span>}
+          {type === 'SMS' && <span className="hint">SMS verification requires an SNS origination number; until one is set it stays pending.</span>}
+        </div>
+        {error && <div className="submit-error">{error}</div>}
+        {notice && <div className="notice">{notice}</div>}
+        <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Working…' : 'Add channel'}</button>
+      </form>
     </div>
   )
 }

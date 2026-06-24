@@ -464,3 +464,62 @@ h1 {
   font-size: 0.85rem;
   margin-bottom: 0.6rem;
 }
+
+/* ── app shell + masthead ─────────────────────────────────────── */
+.app { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
+.masthead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 4px; margin-bottom: 18px;
+  border-bottom: 0.5px solid #1e2a3a;
+}
+.brand { display: flex; align-items: center; gap: 10px; background: none; border: none; cursor: pointer; padding: 0; }
+.brand-logo { width: 26px; height: 26px; border-radius: 6px; }
+.brand-name { font-size: 16px; font-weight: 500; color: #e2e8f0; }
+.user-area { position: relative; }
+.user-pill {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  background: none; border: 0.5px solid #1e2a3a; border-radius: 999px; padding: 5px 10px; color: #94a3b8; font-size: 13px;
+}
+.user-pill:hover { border-color: #2b3a4f; }
+.avatar { width: 22px; height: 22px; border-radius: 50%; background: #1d4ed8; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; }
+.user-email { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu {
+  position: absolute; right: 0; top: 42px; width: 200px; z-index: 10;
+  background: #161b27; border: 0.5px solid #2b3a4f; border-radius: 10px; padding: 6px;
+}
+.menu-item { display: block; width: 100%; text-align: left; background: none; border: none; color: #e2e8f0; font-size: 13px; padding: 9px 10px; border-radius: 7px; cursor: pointer; }
+.menu-item:hover { background: #1e2a3a; }
+
+/* ── panels ───────────────────────────────────────────────────── */
+.panel { margin-bottom: 22px; }
+.panel-title { font-size: 16px; font-weight: 500; margin: 0 0 12px; color: #e2e8f0; }
+.back { display: inline-block; margin-bottom: 8px; padding-left: 0; }
+.feed-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.feed-count { font-size: 12px; color: #64748b; }
+
+/* ── feed cards ───────────────────────────────────────────────── */
+.feed-list { display: flex; flex-direction: column; gap: 8px; }
+.feed-card { border: 0.5px solid #1e2a3a; border-radius: 12px; background: #161b27; padding: 12px 14px; }
+.feed-card.flagging { border-color: #2563eb; }
+.feed-card-head { display: flex; align-items: center; gap: 10px; }
+.fc-ticker { font-weight: 500; font-size: 15px; min-width: 52px; }
+.fc-meta { font-size: 13px; color: #94a3b8; flex: 1; }
+.flag-btn { background: none; border: none; color: #64748b; cursor: pointer; font-size: 17px; line-height: 1; padding: 2px 4px; }
+.flag-btn:hover { color: #93c5fd; }
+.fc-flagged { font-size: 12px; color: #6ee7b7; display: flex; align-items: center; gap: 4px; }
+.fc-sentiment { margin: 8px 0 0; font-size: 13px; color: #94a3b8; line-height: 1.5; }
+.fc-tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.fc-tag { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 0.5px solid #1e2a3a; color: #94a3b8; }
+
+.badge-buy { background: #064e3b; color: #6ee7b7; }
+.badge-sell { background: #4c1d1d; color: #fca5a5; }
+.badge-neutral { background: #1e2a3a; color: #cbd5e1; }
+
+/* ── feedback form ────────────────────────────────────────────── */
+.feedback-form { margin-top: 12px; border-top: 0.5px solid #1e2a3a; padding-top: 12px; }
+.fb-label { margin: 0 0 8px; font-size: 12px; color: #94a3b8; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.chip { font-size: 12px; padding: 5px 11px; border-radius: 8px; border: 0.5px solid #1e2a3a; background: none; color: #94a3b8; cursor: pointer; }
+.chip-on { border-color: #2563eb; color: #93c5fd; background: #0c2a4d; }
+.fb-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.query-panel { border-top: 0.5px solid #1e2a3a; padding-top: 18px; }

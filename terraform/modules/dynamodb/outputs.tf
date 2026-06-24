@@ -33,3 +33,11 @@ output "open_positions_table_name" {
 output "open_positions_table_arn" {
   value = aws_dynamodb_table.open_positions.arn
 }
+
+output "feedback_table_name" {
+  value = aws_dynamodb_table.feedback.name
+}
+
+output "feedback_table_arn" {
+  value = aws_dynamodb_table.feedback.arn
+}

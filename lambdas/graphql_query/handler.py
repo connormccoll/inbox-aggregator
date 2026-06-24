@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
@@ -28,6 +29,9 @@ dynamodb = boto3.resource("dynamodb", region_name=region)
 
 RECOMMENDATIONS_TABLE = os.environ["RECOMMENDATIONS_TABLE"]
 OPEN_POSITIONS_TABLE = os.environ["OPEN_POSITIONS_TABLE"]
+FEEDBACK_TABLE = os.environ.get("FEEDBACK_TABLE", "")
+
+RANGE_DAYS = {"today": 1, "week": 7, "month": 30}
 CLOSE_ACTIONS = {"CLOSE", "SELL", "STOP_LOSS", "NEGATIVE"}
 
 TICKER_STOPWORDS = {
@@ -278,6 +282,71 @@ def _run_chat_query(prompt: str) -> dict:
     return {"summary": summary, "rows": rows, "intent": "recommendations"}
 
 
+def _format_feed_row(item: dict) -> dict:
+    sk = str(item.get("SK", ""))
+    message_id = sk.split("#", 1)[1] if "#" in sk else sk
+    return {
+        "id": sk,
+        "message_id": message_id,
+        "ticker": item.get("ticker"),
+        "action": item.get("action"),
+        "source": item.get("source"),
+        "email_date": item.get("email_date"),
+        "created_at": item.get("created_at"),
+        "sentiment": item.get("sentiment"),
+        "confidence": item.get("confidence"),
+        "email_subject": item.get("email_subject"),
+        "price_target": item.get("price_target"),
+        "stop_loss_price": item.get("stop_loss_price"),
+        "instrument_type": item.get("instrument_type"),
+        "option_symbol": item.get("option_symbol"),
+    }
+
+
+def _query_recent(range_key: str, limit: int = 300) -> list[dict]:
+    """Recommendations across a rolling window via the DateIndex GSI."""
+    days = RANGE_DAYS.get(range_key, 1)
+    table = dynamodb.Table(RECOMMENDATIONS_TABLE)
+    today = datetime.now(timezone.utc).date()
+    rows: list[dict] = []
+    for i in range(days):
+        date_str = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        kwargs = {"IndexName": "DateIndex",
+                  "KeyConditionExpression": Key("date_pk").eq(f"DATE#{date_str}")}
+        resp = table.query(**kwargs)
+        rows.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(ExclusiveStartKey=resp["LastEvaluatedKey"], **kwargs)
+            rows.extend(resp.get("Items", []))
+    rows.sort(key=lambda r: (str(r.get("email_date", "")), str(r.get("created_at", ""))), reverse=True)
+    return [_format_feed_row(r) for r in rows[:limit]]
+
+
+def _submit_feedback(sub: str | None, variables: dict) -> dict:
+    if not FEEDBACK_TABLE:
+        return {"ok": False, "error": "Feedback storage is not configured."}
+    message_id = str(variables.get("messageId") or "").strip()
+    ticker = str(variables.get("ticker") or "").upper().strip()
+    if not message_id or not ticker:
+        return {"ok": False, "error": "messageId and ticker are required."}
+    now = datetime.now(timezone.utc).isoformat()
+    dynamodb.Table(FEEDBACK_TABLE).put_item(Item={
+        "PK": "FEEDBACK",
+        "SK": f"{now}#{message_id}#{ticker}",
+        "message_id": message_id,
+        "ticker": ticker,
+        "reason": str(variables.get("reason") or "").strip(),
+        "note": str(variables.get("note") or "").strip(),
+        "model_action": str(variables.get("modelAction") or "").strip(),
+        "source": str(variables.get("source") or "").strip(),
+        "email_subject": str(variables.get("emailSubject") or "").strip(),
+        "status": "NEW",
+        "sub": sub or "",
+        "created_at": now,
+    })
+    return {"ok": True, "message": "Thanks - feedback recorded."}
+
+
 def _in_active_group(event: dict) -> bool:
     """True if the caller's Cognito token carries the 'active' group claim."""
     claims = (
@@ -313,6 +382,17 @@ def lambda_handler(event: dict, _context) -> dict:
             prompt = str(variables.get("prompt") or "")
             result = _run_chat_query(prompt)
             return _response(200, {"data": {"chatQuery": _to_jsonable(result)}})
+
+        if "recentRecommendations" in query:
+            range_key = str(variables.get("range") or "today").lower()
+            rows = _query_recent(range_key)
+            return _response(200, {"data": {"recentRecommendations": _to_jsonable(rows)}})
+
+        if "submitFeedback" in query:
+            sub = (event.get("requestContext", {}).get("authorizer", {})
+                   .get("claims", {}).get("sub"))
+            result = _submit_feedback(sub, variables)
+            return _response(200, {"data": {"submitFeedback": _to_jsonable(result)}})
 
         if "recommendations" in query:
             ticker = _extract_ticker(str(variables.get("ticker") or ""))

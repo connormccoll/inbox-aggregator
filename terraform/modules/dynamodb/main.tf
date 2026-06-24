@@ -123,6 +123,47 @@ resource "aws_dynamodb_table" "users" {
 }
 
 # ──────────────────────────────────────────────
+# Feedback table — user reports that an extraction was wrong.
+# PK: FEEDBACK  SK: <created_at>#<message_id>#<ticker>
+# GSI: FeedbackStatus — hash: status ("NEW")  range: SK
+# ──────────────────────────────────────────────
+resource "aws_dynamodb_table" "feedback" {
+  name         = "${local.prefix}-feedback"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "FeedbackStatus"
+    hash_key        = "status"
+    range_key       = "SK"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  tags = {
+    Name = "${local.prefix}-feedback"
+  }
+}
+
+# ──────────────────────────────────────────────
 # OpenPositions table
 # Tracks one row per ticker per source.
 # BUY/POSITIVE → open_status=OPEN (no TTL)

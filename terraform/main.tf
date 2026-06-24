@@ -102,6 +102,8 @@ data "aws_iam_policy_document" "dynamodb_readwrite" {
       module.dynamodb.processed_emails_table_arn,
       module.dynamodb.open_positions_table_arn,
       "${module.dynamodb.open_positions_table_arn}/index/*",
+      module.dynamodb.feedback_table_arn,
+      "${module.dynamodb.feedback_table_arn}/index/*",
     ]
   }
 }
@@ -449,6 +451,7 @@ module "lambda_graphql_query" {
   environment_variables = {
     RECOMMENDATIONS_TABLE = module.dynamodb.recommendations_table_name
     OPEN_POSITIONS_TABLE  = module.dynamodb.open_positions_table_name
+    FEEDBACK_TABLE        = module.dynamodb.feedback_table_name
     AWS_REGION_NAME       = var.aws_region
   }
 
