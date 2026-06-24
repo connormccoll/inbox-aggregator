@@ -66,7 +66,8 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
       "closed_by": null
     }}
   ],
-    "source_name": "TradeSmith"
+    "source_name": "TradeSmith",
+    "analyst": "Zach Scheidt"
 }}
 
 Rules:
@@ -101,6 +102,7 @@ OTHER RULES:
 - closed_by: if the email says "Was closed in Newsletters: X" or similar, extract X; else null
 - ticker: always the underlying stock symbol, not the option symbol
 - source_name: the newsletter or publication name (e.g. "Banyan Hill", "Motley Fool"), NOT the forwarding sender
+- analyst: the PERSON who wrote the email or made the call (newsletter author/editor/analyst), e.g. "Zach Scheidt", "Keith Kaplan". This is an individual's name, distinct from source_name (the publication). null if no person is identifiable.
 - ticker must be explicitly present in the email text as a stock symbol (e.g. AAPL, TSLA, NVDA, or NASDAQ:AAPL / NYSE:GEV). Do not infer ticker symbols from company names alone (e.g. Apple, Staples).
 
 Email subject: {subject}
@@ -217,11 +219,15 @@ def _load_active_prompt() -> str:
             item = dynamodb.Table(PROMPTS_TABLE).get_item(
                 Key={"PK": "PROMPT#extraction", "SK": "CURRENT"}
             ).get("Item")
-            body = item.get("body") if item else None
-            if body and _valid_template(body):
-                return body
-            if body:
-                logger.error("Stored prompt failed validation - using base prompt.")
+            if item:
+                version = int(item.get("version", 0) or 0)
+                body = item.get("body")
+                # Version 0 just tracks the code base; only human-approved
+                # versions (>= 1) override the built-in prompt.
+                if version >= 1 and body and _valid_template(body):
+                    return body
+                if version >= 1 and body:
+                    logger.error("Stored prompt failed validation - using base prompt.")
         except Exception as exc:
             logger.error("Could not load active prompt: %s - using base.", exc)
     return EXTRACTION_PROMPT
@@ -382,6 +388,7 @@ def _write_recommendations(recommendations_table, open_positions_table, email: d
     email_date = _resolve_email_date(email.get("date", ""))
     message_id = email["message_id"]
     source_name = extracted.get("source_name", "Unknown")
+    analyst = (extracted.get("analyst") or "").strip()
     ttl = int(time.time()) + (RECOMMENDATIONS_TTL_DAYS * 86400)
 
     for rec in extracted.get("recommendations", []):
@@ -437,6 +444,8 @@ def _write_recommendations(recommendations_table, open_positions_table, email: d
         closed_by = rec.get("closed_by")
         if closed_by:
             item["closed_by"] = str(closed_by)
+        if analyst:
+            item["analyst"] = analyst
 
         recommendations_table.put_item(Item=item)
         logger.info("Wrote recommendation: ticker=%s action=%s source=%s", ticker, action, source_name)

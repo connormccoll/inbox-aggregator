@@ -328,7 +328,7 @@ function FeedCard({ rec }) {
       <div className="feed-card-head">
         <span className="fc-ticker">{rec.ticker}</span>
         <span className={`badge ${actionClass(rec.action)}`}>{(rec.action || '').replace('_', ' ')}</span>
-        <span className="fc-meta">{rec.source || 'Unknown'} · {rec.email_date}</span>
+        <span className="fc-meta">{rec.source || 'Unknown'}{rec.analyst ? ` · ${rec.analyst}` : ''} · {rec.email_date}</span>
         {done ? (
           <span className="fc-flagged"><span aria-hidden="true">✓</span> Flagged</span>
         ) : (
@@ -517,7 +517,7 @@ function QueryRows({ rows, intent }) {
             <th>Ticker</th><th>Source</th>
             {isClose
               ? <><th>Close</th><th>Close Date</th><th>First Rec</th><th>Confidence</th><th>Sentiment</th></>
-              : <><th>Action</th><th>Date</th><th>Confidence</th><th>Sentiment</th><th>Target</th><th>Stop</th></>}
+              : <><th>Analyst</th><th>Action</th><th>Date</th><th>Confidence</th><th>Sentiment</th><th>Target</th><th>Stop</th></>}
           </tr>
         </thead>
         <tbody>
@@ -527,7 +527,7 @@ function QueryRows({ rows, intent }) {
               <td>{row.source || '-'}</td>
               {isClose
                 ? <><td>{row.close_action || row.action || '-'}</td><td>{row.close_date || '-'}</td><td>{row.first_rec_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td></>
-                : <><td>{row.action || '-'}</td><td>{row.email_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td><td>{row.price_target || '-'}</td><td>{row.stop_loss_price || '-'}</td></>}
+                : <><td>{row.analyst || '-'}</td><td>{row.action || '-'}</td><td>{row.email_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td><td>{row.price_target || '-'}</td><td>{row.stop_loss_price || '-'}</td></>}
             </tr>
           ))}
         </tbody>

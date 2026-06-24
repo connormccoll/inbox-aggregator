@@ -42,11 +42,10 @@ def _valid(template: str) -> bool:
 
 def _current(table) -> tuple[int, str]:
     item = table.get_item(Key={"PK": PK, "SK": "CURRENT"}).get("Item")
-    if item and item.get("body"):
-        return int(item.get("version", 0)), item["body"]
-    # Lazy-seed from the canonical base so email_processor and the UI agree.
-    table.put_item(Item={"PK": PK, "SK": "CURRENT", "version": 0,
-                         "body": BASE_EXTRACTION_PROMPT, "updated_at": _now()})
+    if item and int(item.get("version", 0) or 0) >= 1 and item.get("body"):
+        return int(item["version"]), item["body"]
+    # Version 0 tracks the code base prompt — no DB row needed until a human
+    # approves a customized version (which writes version >= 1).
     return 0, BASE_EXTRACTION_PROMPT
 
 
