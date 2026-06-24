@@ -87,6 +87,8 @@ jobs:
             -var="bedrock_model_id=${{ vars.BEDROCK_MODEL_ID }}" \
             -var="daily_digest_cron=${{ vars.DAILY_DIGEST_CRON }}" \
             -input=false \
+            -var="google_client_id=${{ secrets.GOOGLE_CLIENT_ID }}" \
+            -var="google_client_secret=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
             -no-color \
             -out=tfplan 2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"

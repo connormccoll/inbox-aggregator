@@ -81,6 +81,8 @@ jobs:
             -var="bedrock_model_id=${{ vars.BEDROCK_MODEL_ID }}" \
             -var="daily_digest_cron=${{ vars.DAILY_DIGEST_CRON }}" \
             -var="invitation_password=${{ secrets.INVITATION_PASSWORD }}" \
+            -var="google_client_id=${{ secrets.GOOGLE_CLIENT_ID }}" \
+            -var="google_client_secret=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
             -input=false \
             -auto-approve
         env:
