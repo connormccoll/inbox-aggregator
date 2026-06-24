@@ -135,14 +135,18 @@ def lambda_handler(event: dict, context) -> None:
             open_position = _get_open_position(ticker, rec.get("source", ""))
 
         message = _format_sms(rec, open_position)
+        rec_url = str(rec.get("url") or "")
+        sms_message = (message + (f"\n{rec_url}" if rec_url else ""))[:320]
         logger.info("Dispatching alert for ticker=%s to %d channel(s)", ticker, len(channels))
 
         notify.dispatch(
             channels,
             sns,
-            sms_message=message[:320],
+            sms_message=sms_message,
             pushover_title=f"[INBOX] {ticker} {rec.get('action', '')}",
             pushover_message=message,
             origination_number=ORIGINATION_NUMBER,
             pushover_token=PUSHOVER_API_TOKEN,
+            pushover_url=rec_url,
+            pushover_url_title="View source",
         )

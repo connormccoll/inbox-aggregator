@@ -79,6 +79,8 @@ def dispatch(
     pushover_message: str,
     origination_number: str = "",
     pushover_token: str = "",
+    pushover_url: str = "",
+    pushover_url_title: str = "",
 ) -> None:
     """Fan a single broadcast out to a list of active channel rows."""
     for ch in channels:
@@ -90,6 +92,7 @@ def dispatch(
             if ctype == "SMS":
                 send_sms(sns, value, sms_message, origination_number)
             elif ctype == "PUSHOVER" and pushover_token:
-                send_pushover(pushover_token, value, pushover_title, pushover_message)
+                send_pushover(pushover_token, value, pushover_title, pushover_message,
+                              url=pushover_url, url_title=pushover_url_title)
         except Exception as exc:
             logger.error("Delivery failed type=%s value=%s: %s", ctype, value, exc)

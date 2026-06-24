@@ -63,7 +63,8 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
       "strike_price": null,
       "expiration_date": null,
       "percent_closed": null,
-      "closed_by": null
+      "closed_by": null,
+      "url": null
     }}
   ],
     "source_name": "TradeSmith",
@@ -103,6 +104,7 @@ OTHER RULES:
 - ticker: always the underlying stock symbol, not the option symbol
 - source_name: the newsletter or publication name (e.g. "Banyan Hill", "Motley Fool"), NOT the forwarding sender
 - analyst: the PERSON who wrote the email or made the call (newsletter author/editor/analyst), e.g. "Zach Scheidt", "Keith Kaplan". This is an individual's name, distinct from source_name (the publication). null if no person is identifiable.
+- url: the single most relevant link in the email for THIS recommendation (the "read more"/article/trade-alert link). Prefer the primary content link; ignore unsubscribe, manage-preferences, and advertisement links. Must start with http:// or https://. null if none.
 - ticker must be explicitly present in the email text as a stock symbol (e.g. AAPL, TSLA, NVDA, or NASDAQ:AAPL / NYSE:GEV). Do not infer ticker symbols from company names alone (e.g. Apple, Staples).
 
 Email subject: {subject}
@@ -446,6 +448,9 @@ def _write_recommendations(recommendations_table, open_positions_table, email: d
             item["closed_by"] = str(closed_by)
         if analyst:
             item["analyst"] = analyst
+        rec_url = (rec.get("url") or "").strip()
+        if rec_url.startswith(("http://", "https://")):
+            item["url"] = rec_url
 
         recommendations_table.put_item(Item=item)
         logger.info("Wrote recommendation: ticker=%s action=%s source=%s", ticker, action, source_name)

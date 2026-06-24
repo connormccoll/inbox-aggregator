@@ -343,6 +343,9 @@ function FeedCard({ rec }) {
           {rec.option_symbol && <span className="fc-tag">{rec.option_symbol}</span>}
         </div>
       )}
+      {rec.url && (
+        <a className="fc-link" href={rec.url} target="_blank" rel="noopener noreferrer">View source ↗</a>
+      )}
       {flagging && (
         <div className="feedback-form">
           <p className="fb-label">What's wrong with this recommendation?</p>
@@ -517,7 +520,7 @@ function QueryRows({ rows, intent }) {
             <th>Ticker</th><th>Source</th>
             {isClose
               ? <><th>Close</th><th>Close Date</th><th>First Rec</th><th>Confidence</th><th>Sentiment</th></>
-              : <><th>Analyst</th><th>Action</th><th>Date</th><th>Confidence</th><th>Sentiment</th><th>Target</th><th>Stop</th></>}
+              : <><th>Analyst</th><th>Action</th><th>Date</th><th>Confidence</th><th>Sentiment</th><th>Target</th><th>Stop</th><th>Link</th></>}
           </tr>
         </thead>
         <tbody>
@@ -527,7 +530,7 @@ function QueryRows({ rows, intent }) {
               <td>{row.source || '-'}</td>
               {isClose
                 ? <><td>{row.close_action || row.action || '-'}</td><td>{row.close_date || '-'}</td><td>{row.first_rec_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td></>
-                : <><td>{row.analyst || '-'}</td><td>{row.action || '-'}</td><td>{row.email_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td><td>{row.price_target || '-'}</td><td>{row.stop_loss_price || '-'}</td></>}
+                : <><td>{row.analyst || '-'}</td><td>{row.action || '-'}</td><td>{row.email_date || '-'}</td><td>{row.confidence || '-'}</td><td>{row.sentiment || '-'}</td><td>{row.price_target || '-'}</td><td>{row.stop_loss_price || '-'}</td><td>{row.url ? <a href={row.url} target="_blank" rel="noopener noreferrer">open</a> : '-'}</td></>}
             </tr>
           ))}
         </tbody>

@@ -552,3 +552,8 @@ h1 {
 .qf-toggle input { width: auto; }
 .parsed-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 10px; }
 .pchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: #0c2a4d; color: #93c5fd; }
+
+/* ── recommendation source link ───────────────────────────────── */
+.fc-link { display: inline-block; margin-top: 8px; font-size: 13px; color: #93c5fd; text-decoration: none; }
+.fc-link:hover { text-decoration: underline; }
+.chat-table a { color: #93c5fd; }
